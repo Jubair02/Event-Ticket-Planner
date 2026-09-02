@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String   @id @default(cuid())
+  name                  String
+  email                 String   @unique
+  phone                 String?
+  password              String
+  role                  String   @default("CUSTOMER") // SUPER_ADMIN | ORGANIZER | CUSTOMER | EVENT_STAFF
+  status                String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  resetCode             String?
+  resetCodeExpiry       DateTime?
+  createdByOrganizerId  String?
+  createdByOrganizer    Organizer?                  @relation("CreatedStaff", fields: [createdByOrganizerId], references: [id])
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  organizer        Organizer?
+  staffAssignments StaffAssignment[]
+  orders           Order[]
+  tickets          Ticket[]
+  checkedInTickets Ticket[]          @relation("CheckedInBy")
+}
+
+model Organizer {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id])
+  organizationName String
+  phone            String?
+  status           String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt        DateTime @default(now())
+
+  events      Event[]
+  createdStaff User[] @relation("CreatedStaff")
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  organizerId String
+  organizer   Organizer @relation(fields: [organizerId], references: [id])
+  title       String
+  description String
+  category    String // CONCERT | TECH | WORKSHOP | SPORTS | CULTURAL | BUSINESS | GAMING | FOOD
+  banner      String?
+  startDate   DateTime
+  endDate     DateTime
+  startTime   String
+  endTime     String
+  venue       String
+  address     String
+  city        String
+  mapUrl      String?
+  status      String   @default("DRAFT") // DRAFT | PENDING_APPROVAL | PUBLISHED | ONGOING | COMPLETED | CANCELLED | REJECTED | SUSPENDED
+  featured    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ticketTypes      TicketType[]
+  orders           Order[]
+  tickets          Ticket[]
+  staffAssignments StaffAssignment[]
+}
+
+model TicketType {
+  id            String    @id @default(cuid())
+  eventId       String
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  price         Float
+  totalQuantity Int
+  soldQuantity  Int       @default(0)
+  maxPerOrder   Int       @default(5)
+  salesStart    DateTime?
+  salesEnd      DateTime?
+  createdAt     DateTime  @default(now())
+
+  tickets Ticket[]
+}
+
+model Order {
+  id            String   @id @default(cuid())
+  orderNumber   String   @unique
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id])
+  subtotal      Float
+  platformFee   Float
+  totalAmount   Float
+  paymentStatus String   @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED
+  status        String   @default("CREATED")
+  createdAt     DateTime @default(now())
+
+  tickets  Ticket[]
+  payments Payment[]
+}
+
+model Ticket {
+  id           String    @id @default(cuid())
+  orderId      String
+  order        Order     @relation(fields: [orderId], references: [id])
+  eventId      String
+  event        Event     @relation(fields: [eventId], references: [id])
+  ticketTypeId String
+  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  attendeeName String
+  ticketCode   String    @unique
+  qrToken      String    @unique
+  status       String    @default("ACTIVE") // ACTIVE | CHECKED_IN | CANCELLED | INVALID
+  checkedInAt  DateTime?
+  checkedInById String?
+  checkedBy    User?     @relation("CheckedInBy", fields: [checkedInById], references: [id])
+  createdAt    DateTime  @default(now())
+}
+
+model Payment {
+  id            String    @id @default(cuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id])
+  amount        Float
+  provider      String    @default("SSLCOMMERZ")
+  method        String?   // bKash | Nagad | CARD
+  transactionId String?
+  status        String    @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model StaffAssignment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+}
