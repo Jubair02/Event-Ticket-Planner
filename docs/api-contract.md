@@ -10,7 +10,7 @@ All agents MUST follow this document exactly. Read it fully before writing code.
 - All list/GET responses return plain JSON. Errors: `{ error: string }` with proper status (400/401/403/404/409/500).
 - Client fetches via `apiGet<T>(path)` / `apiPost<T>(path, body)` / `apiPut<T>` / `apiDelete<T>` from `@/lib/api` (credentials: 'include', throws Error(message) on !ok).
 - Dates are ISO strings over the wire (JSON). `startTime`/`endTime` are plain strings "HH:mm".
-- Enums are plain strings (SQLite).
+- Enums are plain strings (Postgres `text`).
 - NEVER create new dependencies. Use only: @prisma/client, jose, bcryptjs, qrcode, html5-qrcode, date-fns, sonner, framer-motion, zustand, @tanstack/react-query, lucide-react, canvas-confetti, shadcn/ui components.
 - Do NOT edit: package.json, prisma/schema.prisma, src/lib/* (except reading), src/app/page.tsx, src/app/layout.tsx, src/app/globals.css, src/components/app/*.
 

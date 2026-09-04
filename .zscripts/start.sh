@@ -53,9 +53,6 @@ cd "$BUILD_DIR" || exit 1
 
 ls -lah
 
-DEFAULT_PACKAGED_DB_PATH="/app/db/custom.db"
-DEFAULT_PACKAGED_DATABASE_URL="file:$DEFAULT_PACKAGED_DB_PATH"
-
 # Python 依赖在构建阶段安装进部署产物，不复用 Sandbox 的 /home/z/.venv。
 # Next.js 及其启动的子进程都会继承这组路径。
 if [ -d "/app/python-runtime/site-packages" ]; then
@@ -75,19 +72,24 @@ if [ -f "./next-service-dist/server.js" ]; then
     export NODE_ENV=production
     export PORT="${PORT:-3000}"
     export HOSTNAME="${HOSTNAME:-0.0.0.0}"
-    export DATABASE_URL="${DATABASE_URL:-$DEFAULT_PACKAGED_DATABASE_URL}"
-
-    if [ "$DATABASE_URL" = "$DEFAULT_PACKAGED_DATABASE_URL" ]; then
-        if [ ! -f "$DEFAULT_PACKAGED_DB_PATH" ]; then
-            echo "❌ 未找到打包后的数据库文件 $DEFAULT_PACKAGED_DB_PATH"
-            echo "   为避免生产环境启动到空数据库，启动已终止"
-            exit 1
-        fi
-
-        echo "🗄️  当前使用打包数据库: $DEFAULT_PACKAGED_DB_PATH"
-    else
-        echo "🗄️  当前使用外部指定数据库: $DATABASE_URL"
+    # 托管 Postgres：DATABASE_URL 必须由环境提供，没有可回退的打包数据库。
+    if [ -z "${DATABASE_URL:-}" ]; then
+        echo "❌ 未设置 DATABASE_URL"
+        echo "   项目使用托管 Postgres，启动前必须注入连接串，启动已终止"
+        exit 1
     fi
+
+    case "$DATABASE_URL" in
+        postgres://*|postgresql://*)
+            # 打印时隐去凭据，避免连接串泄露到日志
+            echo "🗄️  当前使用 Postgres 数据库: $(printf '%s' "$DATABASE_URL" | sed -E 's#(://)[^@]*@#***@#')"
+            ;;
+        *)
+            echo "❌ DATABASE_URL 不是 Postgres 连接串: $DATABASE_URL"
+            echo "   项目已从 SQLite 迁移到 Postgres，启动已终止"
+            exit 1
+            ;;
+    esac
     
     # 后台启动 Next.js
     bun server.js &

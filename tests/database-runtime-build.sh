@@ -6,70 +6,60 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/../.zscripts" && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-FAKE_BIN="$TEST_ROOT/bin"
-mkdir -p "$FAKE_BIN"
-cat >"$FAKE_BIN/bun" <<'EOF'
-#!/bin/bash
-set -euo pipefail
+TARGET="$SCRIPT_DIR/database-runtime-build.sh"
 
-if [ "$#" -ne 2 ] || [ "$1" != "run" ] || [ "$2" != "db:push" ]; then
-    echo "unexpected bun invocation: $*" >&2
+# 项目已迁移到托管 Postgres：该步骤只校验 DATABASE_URL，
+# 不再复制/初始化任何数据库文件。
+
+# 1) 环境变量提供 Postgres 连接串时应通过，且不在产物中创建 db 目录。
+PROJECT="$TEST_ROOT/p1"
+BUILD="$TEST_ROOT/b1"
+mkdir -p "$PROJECT"
+
+DATABASE_URL="postgresql://user:pw@example.neon.tech/neondb?sslmode=require" \
+    PROJECT_DIR="$PROJECT" BUILD_DIR="$BUILD" bash "$TARGET"
+
+test ! -e "$BUILD/db"
+test ! -e "$BUILD/db/custom.db"
+
+# 2) 环境变量缺失时应回退读取 PROJECT_DIR/.env。
+PROJECT="$TEST_ROOT/p2"
+BUILD="$TEST_ROOT/b2"
+mkdir -p "$PROJECT"
+printf 'DATABASE_URL="postgres://user:pw@example.neon.tech/neondb"\n' >"$PROJECT/.env"
+
+env -u DATABASE_URL PROJECT_DIR="$PROJECT" BUILD_DIR="$BUILD" bash "$TARGET"
+
+# 3) 既无环境变量也无 .env 时应失败。
+PROJECT="$TEST_ROOT/p3"
+BUILD="$TEST_ROOT/b3"
+mkdir -p "$PROJECT"
+
+if env -u DATABASE_URL PROJECT_DIR="$PROJECT" BUILD_DIR="$BUILD" bash "$TARGET" >/dev/null 2>&1; then
+    echo "expected failure when DATABASE_URL is missing" >&2
     exit 1
 fi
 
-case "${DATABASE_URL:-}" in
-    file:*) db_path="${DATABASE_URL#file:}" ;;
-    *)
-        echo "DATABASE_URL must be an absolute SQLite file URL" >&2
-        exit 1
-        ;;
-esac
+# 4) 仍指向 SQLite 文件时应失败，避免静默部署到空的本地库。
+PROJECT="$TEST_ROOT/p4"
+BUILD="$TEST_ROOT/b4"
+mkdir -p "$PROJECT"
 
-case "$db_path" in
-    /*) ;;
-    *)
-        echo "database path must be absolute: $db_path" >&2
-        exit 1
-        ;;
-esac
-
-mkdir -p "$(dirname "$db_path")"
-if [ ! -f "$db_path" ]; then
-    printf 'initialized\n' >"$db_path"
+if DATABASE_URL="file:/app/db/custom.db" \
+    PROJECT_DIR="$PROJECT" BUILD_DIR="$BUILD" bash "$TARGET" >/dev/null 2>&1; then
+    echo "expected failure for SQLite DATABASE_URL" >&2
+    exit 1
 fi
-printf '%s\n' "$DATABASE_URL" >>"${DB_PUSH_CALLS:?}"
-EOF
-chmod +x "$FAKE_BIN/bun"
 
-export PATH="$FAKE_BIN:$PATH"
-export DB_PUSH_CALLS="$TEST_ROOT/db-push-calls"
+# 5) 无法识别的协议应失败。
+PROJECT="$TEST_ROOT/p5"
+BUILD="$TEST_ROOT/b5"
+mkdir -p "$PROJECT"
 
-# 没有 Preview 数据库时，应只在部署产物中初始化空库，不修改项目目录。
-EMPTY_PROJECT="$TEST_ROOT/empty-project"
-EMPTY_BUILD="$TEST_ROOT/empty-build"
-mkdir -p "$EMPTY_PROJECT"
-
-PROJECT_DIR="$EMPTY_PROJECT" BUILD_DIR="$EMPTY_BUILD" \
-    bash "$SCRIPT_DIR/database-runtime-build.sh"
-
-test -f "$EMPTY_BUILD/db/custom.db"
-test "$(cat "$EMPTY_BUILD/db/custom.db")" = "initialized"
-test ! -e "$EMPTY_PROJECT/db/custom.db"
-
-# 有 Preview 数据库时，应保留数据和同目录文件，再对产物执行 schema 同步。
-EXISTING_PROJECT="$TEST_ROOT/existing-project"
-EXISTING_BUILD="$TEST_ROOT/existing-build"
-mkdir -p "$EXISTING_PROJECT/db"
-printf 'preview-data\n' >"$EXISTING_PROJECT/db/custom.db"
-printf 'sidecar\n' >"$EXISTING_PROJECT/db/README.txt"
-
-PROJECT_DIR="$EXISTING_PROJECT" BUILD_DIR="$EXISTING_BUILD" \
-    bash "$SCRIPT_DIR/database-runtime-build.sh"
-
-test "$(cat "$EXISTING_BUILD/db/custom.db")" = "preview-data"
-test "$(cat "$EXISTING_BUILD/db/README.txt")" = "sidecar"
-test "$(wc -l <"$DB_PUSH_CALLS" | tr -d ' ')" = "2"
-grep -Fx "file:$EMPTY_BUILD/db/custom.db" "$DB_PUSH_CALLS"
-grep -Fx "file:$EXISTING_BUILD/db/custom.db" "$DB_PUSH_CALLS"
+if DATABASE_URL="mysql://user:pw@example.com/db" \
+    PROJECT_DIR="$PROJECT" BUILD_DIR="$BUILD" bash "$TARGET" >/dev/null 2>&1; then
+    echo "expected failure for non-Postgres DATABASE_URL" >&2
+    exit 1
+fi
 
 echo "database runtime build tests passed"

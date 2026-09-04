@@ -25,7 +25,10 @@ export async function GET(req: NextRequest) {
     const where: Record<string, unknown> = {}
     if (role) where.role = role
     if (q) {
-      where.OR = [{ name: { contains: q } }, { email: { contains: q } }]
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+      ]
     }
 
     const users = await db.user.findMany({

@@ -1,14 +1,14 @@
 # Worklog — Event & Ticket Booking Platform (TicketBD) MVP
 
 Project: Bangladesh-focused Event & Ticket Booking Platform (like Shohoz Events / TicketBhai)
-Stack: Next.js 16 (App Router) + TypeScript + Tailwind 4 + shadcn/ui + Prisma (SQLite) + Zustand + TanStack Query
+Stack: Next.js 16 (App Router) + TypeScript + Tailwind 4 + shadcn/ui + Prisma (PostgreSQL) + Zustand + TanStack Query
 
 ## Architecture Decisions (locked)
 
 - **Single visible route**: `/` (src/app/page.tsx) is the ONLY page. The entire app is a client-side SPA whose views are switched via a Zustand store (`src/lib/store.ts`). Navigation = `navigate(view)`.
 - **APIs**: Next.js route handlers under `src/app/api/**` (NO server actions).
 - **Auth**: custom JWT (jose, HS256) in httpOnly cookie `ticketbd_token`. Password hashing with bcryptjs. Roles: SUPER_ADMIN, ORGANIZER, CUSTOMER, EVENT_STAFF.
-- **DB**: Prisma + SQLite (file db/custom.db). Helper: `import { db } from '@/lib/db'`.
+- **DB**: Prisma + PostgreSQL (Neon, via `DATABASE_URL`). Helper: `import { db } from '@/lib/db'`.
 - **Payments**: Mock SSLCOMMERZ gateway rendered inside the SPA. Server-side execution + verification; tickets are generated ONLY in the server-side payment-success path (never trusted from frontend). Platform fee = 3% of subtotal.
 - **QR**: `qrcode` (client-side generation), `html5-qrcode` (camera scan) + manual token entry fallback.
 - **Theme**: bottle-green primary (Bangladesh vibe), rose accent, full dark mode via next-themes.

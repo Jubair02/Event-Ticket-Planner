@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 /**
  * GET /api/events?search=&category=&city=&sort=upcoming|popular&featured=true
  * Public listing — only PUBLISHED events.
- * Note: SQLite `contains` is case-insensitive for ASCII, so no `mode` needed.
+ * Note: Postgres `contains` is case-sensitive, so `mode: 'insensitive'` is required.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -21,8 +21,8 @@ export async function GET(req: NextRequest) {
     if (featured) where.featured = true
     if (search) {
       where.OR = [
-        { title: { contains: search } },
-        { description: { contains: search } },
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
       ]
     }
 

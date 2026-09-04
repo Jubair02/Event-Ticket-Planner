@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
     const where: Record<string, unknown> = {}
     if (status) where.status = status
-    if (q) where.title = { contains: q }
+    if (q) where.title = { contains: q, mode: 'insensitive' }
 
     const events = await db.event.findMany({
       where,
