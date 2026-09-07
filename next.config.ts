@@ -7,9 +7,8 @@ const nextConfig: NextConfig = {
   // option if it is missing.
   output: process.env.VERCEL ? undefined : "standalone",
   /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // Type errors fail the build on purpose. The standalone socket.io samples in
+  // examples/ are excluded in tsconfig.json instead of muting the whole check.
   reactStrictMode: false,
 };
 

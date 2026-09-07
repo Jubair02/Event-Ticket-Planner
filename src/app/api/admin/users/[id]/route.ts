@@ -21,6 +21,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const target = await db.user.findUnique({ where: { id } })
     if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
+    // Admins must not be able to lock each other out. The dashboard already
+    // hides the control for admin rows; this enforces it at the API too.
+    if (target.role === 'SUPER_ADMIN' && status === 'SUSPENDED') {
+      return NextResponse.json({ error: 'Super admin accounts cannot be suspended' }, { status: 403 })
+    }
+
     const user = await db.user.update({
       where: { id },
       data: { status },

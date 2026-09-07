@@ -44,18 +44,25 @@ export function categoryEmoji(cat: string): string {
   return CATEGORY_LABELS[cat]?.emoji ?? '🎪'
 }
 
-/** "2 days left" style label (or "Happening now" / "Ended") */
-export function daysUntil(iso: string): string {
-  const now = new Date()
-  const d = new Date(iso)
-  const diffMs = d.getTime() - now.getTime()
-  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+/**
+ * "2 days left" style label (or "Happening now" / "Ended").
+ *
+ * Pass `endIso` for events that can be in progress: between start and end the
+ * label is "Happening now", because comparing against the start date alone
+ * would call a live event "Ended".
+ */
+export function daysUntil(iso: string, endIso?: string | null): string {
+  const now = Date.now()
+  const start = new Date(iso).getTime()
+
+  if (endIso) {
+    const end = new Date(endIso).getTime()
+    if (!Number.isNaN(end) && start <= now && now <= end) return 'Happening now'
+  }
+
+  const days = Math.ceil((start - now) / (1000 * 60 * 60 * 24))
   if (days < 0) return 'Ended'
   if (days === 0) return 'Today'
   if (days === 1) return 'Tomorrow'
   return `${days} days left`
-}
-
-export function isUpcoming(startDate: string): boolean {
-  return new Date(startDate).getTime() >= Date.now()
 }

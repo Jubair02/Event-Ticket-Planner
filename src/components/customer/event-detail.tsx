@@ -35,6 +35,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/app/empty-state'
 import { cn } from '@/lib/utils'
+import { safeHttpUrl } from '@/lib/url'
 
 interface TicketWindow {
   available: number
@@ -134,7 +135,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
   }
 
   const selectedRows = event.ticketTypes.filter((t) => (selected[t.id] ?? 0) > 0)
-  const dateLabel = daysUntil(event.startDate)
+  const dateLabel = daysUntil(event.startDate, event.endDate)
 
   return (
     <div className="pb-28 lg:pb-10">
@@ -216,9 +217,9 @@ export function EventDetail({ eventId }: { eventId: string }) {
                     <p className="text-sm text-muted-foreground">
                       {event.address}, {event.city}
                     </p>
-                    {event.mapUrl && (
+                    {safeHttpUrl(event.mapUrl) && (
                       <a
-                        href={event.mapUrl}
+                        href={safeHttpUrl(event.mapUrl) as string}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-0.5 inline-flex items-center gap-1 text-sm text-primary hover:underline"

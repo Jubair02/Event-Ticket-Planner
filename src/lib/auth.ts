@@ -4,11 +4,61 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 
-const SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || 'ticketbd-dev-secret-key-change-in-production'
-)
+const DEV_FALLBACK_SECRET = 'ticketbd-dev-secret-key-change-in-production'
+const MIN_SECRET_LENGTH = 32
+
+let cachedSecret: Uint8Array | null = null
+
+/**
+ * HS256 signing key, resolved lazily so a misconfigured deployment fails on the
+ * first auth attempt rather than at import time.
+ *
+ * AUTH_SECRET is REQUIRED in production: falling back to a hardcoded value there
+ * would let anyone who has seen this source forge a session for any account,
+ * including SUPER_ADMIN.
+ */
+function getSecret(): Uint8Array {
+  if (cachedSecret) return cachedSecret
+
+  const configured = process.env.AUTH_SECRET?.trim()
+  if (configured && configured.length >= MIN_SECRET_LENGTH) {
+    cachedSecret = new TextEncoder().encode(configured)
+    return cachedSecret
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      configured
+        ? `AUTH_SECRET is too short (${configured.length} chars) — use at least ${MIN_SECRET_LENGTH}.`
+        : 'AUTH_SECRET is not set. Refusing to sign or verify sessions with the development fallback secret in production.'
+    )
+  }
+
+  cachedSecret = new TextEncoder().encode(DEV_FALLBACK_SECRET)
+  return cachedSecret
+}
 
 export const COOKIE_NAME = 'ticketbd_token'
+
+/** Session lifetime in seconds (matches the JWT expiry). */
+export const SESSION_MAX_AGE = 7 * 24 * 3600
+
+/**
+ * Options for the session cookie, shared by login/register/logout so the flags
+ * cannot drift apart.
+ *
+ * `secure` is on in production so the token is never transmitted over plain
+ * HTTP, and off elsewhere so http://localhost still works in development.
+ */
+export function sessionCookieOptions(maxAge: number = SESSION_MAX_AGE) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge,
+  }
+}
 
 export type SessionPayload = {
   sub: string
@@ -21,12 +71,15 @@ export async function signToken(payload: SessionPayload): Promise<string> {
     .setSubject(payload.sub)
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(SECRET)
+    .sign(getSecret())
 }
 
 export async function verifyToken(token: string): Promise<SessionPayload | null> {
+  // Resolved outside the try so a missing AUTH_SECRET surfaces as an error
+  // instead of being swallowed as "no valid session".
+  const secret = getSecret()
   try {
-    const { payload } = await jwtVerify(token, SECRET)
+    const { payload } = await jwtVerify(token, secret)
     if (!payload.sub) return null
     return { sub: payload.sub, role: (payload.role as string) || 'CUSTOMER' }
   } catch {

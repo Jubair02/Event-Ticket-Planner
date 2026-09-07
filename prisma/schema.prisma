@@ -98,6 +98,11 @@ model Order {
   totalAmount   Float
   paymentStatus String   @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED
   status        String   @default("CREATED")
+  // Attendee the tickets are issued to (captured at checkout). Nullable because
+  // orders created before this field existed fall back to the buyer's name.
+  attendeeName  String?
+  attendeeEmail String?
+  attendeePhone String?
   createdAt     DateTime @default(now())
 
   tickets  Ticket[]

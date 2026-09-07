@@ -105,6 +105,10 @@ export async function POST(req: NextRequest) {
             totalAmount,
             paymentStatus: 'PENDING',
             status: 'CREATED',
+            // Tickets are issued to this attendee, not to the buyer.
+            attendeeName,
+            attendeeEmail,
+            attendeePhone,
             payments: {
               create: {
                 amount: totalAmount,

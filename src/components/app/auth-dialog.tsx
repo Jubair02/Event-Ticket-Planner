@@ -129,15 +129,25 @@ export function AuthDialog() {
     setLoading(true)
     try {
       if (forgotStep === 'email') {
-        const data = await apiPost<{ ok: boolean; resetCode: string }>('/api/auth/forgot', {
+        const data = await apiPost<{ ok: boolean; resetCode?: string }>('/api/auth/forgot', {
           email: forgotEmail,
         })
-        setResetCode(data.resetCode)
         setForgotStep('reset')
-        toast.info('Demo mode: here is your reset code (would be emailed in production)', {
-          description: `Reset code: ${data.resetCode}`,
-          duration: 15000,
-        })
+        if (data.resetCode) {
+          // Demo mode: the server echoed the code back so it can be shown here.
+          setResetCode(data.resetCode)
+          toast.info('Demo mode: here is your reset code (would be emailed in production)', {
+            description: `Reset code: ${data.resetCode}`,
+            duration: 15000,
+          })
+        } else {
+          // Production: the code is never sent to the browser.
+          setResetCode('')
+          toast.info('If an account exists for that email, a reset code has been sent.', {
+            description: 'Enter the code along with your new password.',
+            duration: 10000,
+          })
+        }
       } else {
         await apiPost('/api/auth/reset', {
           email: forgotEmail,
@@ -331,7 +341,7 @@ export function AuthDialog() {
               </Button>
             </form>
             <p className="text-center text-xs text-muted-foreground">
-              MVP demo: reset codes are shown on screen instead of sent by email.
+              In demo mode the reset code is shown on screen; in production it is emailed instead.
             </p>
           </TabsContent>
         </Tabs>

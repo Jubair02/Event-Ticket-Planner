@@ -132,7 +132,8 @@ log_step_end "bun run db:push"
 
 log_step_start "Starting Next.js dev server"
 echo "[BUN] Starting development server..."
-bun run dev &
+# dev:log keeps the dev.log capture (the portable `dev` script has no tee).
+bun run dev:log &
 DEV_PID=$!
 log_step_end "Starting Next.js dev server"
 

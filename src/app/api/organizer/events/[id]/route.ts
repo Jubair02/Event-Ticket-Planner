@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
 import { CATEGORIES } from '@/lib/constants'
+import { safeHttpUrl } from '@/lib/url'
 
 function parseDate(v: unknown): Date | null | 'invalid' {
   if (v === undefined || v === null || v === '') return null
@@ -45,7 +46,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       data.category = body.category
     }
     if ('banner' in body) data.banner = typeof body.banner === 'string' && body.banner.trim() ? body.banner.trim() : null
-    if ('mapUrl' in body) data.mapUrl = typeof body.mapUrl === 'string' && body.mapUrl.trim() ? body.mapUrl.trim() : null
+    if ('mapUrl' in body) {
+      const raw = typeof body.mapUrl === 'string' ? body.mapUrl.trim() : ''
+      const safe = raw ? safeHttpUrl(raw) : null
+      if (raw && !safe) {
+        return NextResponse.json({ error: 'Map URL must be a valid http(s) link' }, { status: 400 })
+      }
+      data.mapUrl = safe
+    }
 
     if ('startDate' in body) {
       const d = parseDate(body.startDate)

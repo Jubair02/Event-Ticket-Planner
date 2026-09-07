@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
 import { CATEGORIES } from '@/lib/constants'
+import { safeHttpUrl } from '@/lib/url'
 
 type TicketTypeInput = {
   name?: unknown
@@ -115,7 +116,11 @@ export async function POST(req: NextRequest) {
     const startTime = str(body.startTime)
     const endTime = str(body.endTime)
     const banner = str(body.banner) || null
-    const mapUrl = str(body.mapUrl) || null
+    const rawMapUrl = str(body.mapUrl)
+    const mapUrl = rawMapUrl ? safeHttpUrl(rawMapUrl) : null
+    if (rawMapUrl && !mapUrl) {
+      return NextResponse.json({ error: 'Map URL must be a valid http(s) link' }, { status: 400 })
+    }
 
     if (!title || !description || !category || !city || !venue || !address || !startTime || !endTime) {
       return NextResponse.json({ error: 'All event fields are required' }, { status: 400 })

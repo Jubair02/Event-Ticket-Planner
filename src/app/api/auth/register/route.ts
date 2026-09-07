@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { COOKIE_NAME, hashPassword, safeUser, signToken } from '@/lib/auth'
+import { COOKIE_NAME, hashPassword, safeUser, sessionCookieOptions, signToken } from '@/lib/auth'
+import { MINUTE, clientIp, enforceRateLimits } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,6 +14,11 @@ export async function POST(req: NextRequest) {
       organizationName?: string
     } | null
     if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+
+    const limited = enforceRateLimits([
+      { key: `register:ip:${clientIp(req)}`, limit: 10, windowMs: 60 * MINUTE },
+    ])
+    if (limited) return limited
 
     const name = (body.name || '').trim()
     const email = (body.email || '').trim().toLowerCase()
@@ -55,12 +61,7 @@ export async function POST(req: NextRequest) {
 
     const token = await signToken({ sub: user.id, role: user.role })
     const res = NextResponse.json({ user: safeUser(user) }, { status: 201 })
-    res.cookies.set(COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 7 * 24 * 3600,
-    })
+    res.cookies.set(COOKIE_NAME, token, sessionCookieOptions())
     return res
   } catch (e) {
     console.error('POST /api/auth/register failed:', e instanceof Error ? e.message : e)

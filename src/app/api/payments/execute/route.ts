@@ -8,6 +8,12 @@ const VALID_METHODS = ['bKash', 'Nagad', 'CARD']
 type FulfillItem = { ticketTypeId: string; quantity: number }
 
 /**
+ * Thrown inside the fulfillment transaction so it rolls back — undoing any
+ * inventory already claimed for earlier items in the same order.
+ */
+class InsufficientInventoryError extends Error {}
+
+/**
  * Reads the canonical item list stashed on the pending Payment row
  * (Payment.transactionId holds the items JSON until the gateway overwrites it
  * with the real transaction id on success). Server-side only — the frontend is
@@ -91,65 +97,74 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Order has no fulfillable item data' }, { status: 400 })
     }
 
-    const result = await db.$transaction(async (tx) => {
-      // Fresh inventory read inside the transaction.
-      const ticketTypes = await tx.ticketType.findMany({
-        where: { id: { in: items.map((i) => i.ticketTypeId) } },
-      })
+    // Tickets are issued to the attendee captured at checkout. Orders created
+    // before that field existed fall back to the buyer's own name.
+    const attendeeName = order.attendeeName?.trim() || order.user.name
 
-      let insufficient = false
-      for (const item of items) {
-        const tt = ticketTypes.find((t) => t.id === item.ticketTypeId)
-        if (!tt || tt.eventId !== order.eventId || tt.soldQuantity + item.quantity > tt.totalQuantity) {
-          insufficient = true
+    let fulfilled: boolean
+    try {
+      await db.$transaction(async (tx) => {
+        // Claim inventory with a conditional UPDATE: the availability check and
+        // the increment happen in one statement, so two concurrent payments
+        // cannot both pass the check and oversell the ticket type. Prisma cannot
+        // express the column-to-column comparison in `where`, hence raw SQL.
+        // 0 affected rows = not enough left (or a bad/foreign ticket type id).
+        for (const item of items) {
+          const claimed = await tx.$executeRaw`
+            UPDATE "TicketType"
+            SET "soldQuantity" = "soldQuantity" + ${item.quantity}
+            WHERE "id" = ${item.ticketTypeId}
+              AND "eventId" = ${order.eventId}
+              AND "soldQuantity" + ${item.quantity} <= "totalQuantity"
+          `
+          if (claimed !== 1) throw new InsufficientInventoryError()
         }
-      }
 
-      if (insufficient) {
-        await tx.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', method } })
-        await tx.order.update({ where: { id: order.id }, data: { paymentStatus: 'FAILED' } })
-        return { fulfilled: false as const }
-      }
-
-      for (const item of items) {
-        for (let i = 0; i < item.quantity; i++) {
-          await tx.ticket.create({
-            data: {
-              orderId: order.id,
-              eventId: order.eventId,
-              ticketTypeId: item.ticketTypeId,
-              userId: order.userId,
-              attendeeName: order.user.name,
-              ticketCode: await generateTicketCode(),
-              qrToken: await generateQrToken(),
-              status: 'ACTIVE',
-            },
-          })
+        for (const item of items) {
+          for (let i = 0; i < item.quantity; i++) {
+            await tx.ticket.create({
+              data: {
+                orderId: order.id,
+                eventId: order.eventId,
+                ticketTypeId: item.ticketTypeId,
+                userId: order.userId,
+                attendeeName,
+                ticketCode: await generateTicketCode(),
+                qrToken: await generateQrToken(),
+                status: 'ACTIVE',
+              },
+            })
+          }
         }
-        // Atomic increment of sold inventory.
-        await tx.ticketType.update({
-          where: { id: item.ticketTypeId },
-          data: { soldQuantity: { increment: item.quantity } },
+
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: 'PAID',
+            method,
+            transactionId: generateTransactionId(),
+            paidAt: new Date(),
+          },
         })
-      }
-
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'PAID',
-          method,
-          transactionId: generateTransactionId(),
-          paidAt: new Date(),
-        },
+        await tx.order.update({
+          where: { id: order.id },
+          data: { paymentStatus: 'PAID', status: 'CONFIRMED' },
+        })
       })
-      await tx.order.update({
-        where: { id: order.id },
-        data: { paymentStatus: 'PAID', status: 'CONFIRMED' },
-      })
-      return { fulfilled: true as const }
-    })
+      fulfilled = true
+    } catch (err) {
+      if (!(err instanceof InsufficientInventoryError)) throw err
+      // The transaction rolled back, so no inventory was consumed. Record the
+      // failure separately — transactionId keeps the item stash so the customer
+      // can retry the payment.
+      await db.$transaction([
+        db.payment.update({ where: { id: payment.id }, data: { status: 'FAILED', method } }),
+        db.order.update({ where: { id: order.id }, data: { paymentStatus: 'FAILED' } }),
+      ])
+      fulfilled = false
+    }
 
-    if (!result.fulfilled) {
+    if (!fulfilled) {
       return NextResponse.json({ status: 'FAILED', orderId, error: 'Insufficient tickets' })
     }
     return NextResponse.json({ status: 'PAID', orderId })

@@ -7,6 +7,8 @@ All agents MUST follow this document exactly. Read it fully before writing code.
 - Next.js 16 App Router. Route handlers: `export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> })` — **params is a Promise, always `await params`**.
 - DB: `import { db } from '@/lib/db'`. Auth helpers: `import { getAuthUser, requireAuth, requireRole, hashPassword, verifyPassword, generateTicketCode, generateQrToken } from '@/lib/auth'`.
 - Money: store as float BDT. **Platform fee = `Math.round(subtotal * 0.03)`** (3%).
+- Auth endpoints (login/register/forgot/reset) are rate limited via `@/lib/rate-limit` and answer **429** with a `Retry-After` header when exceeded. The limiter is in-process, so it is per-instance on serverless — back it with a shared store (Vercel KV / Upstash) for hard guarantees.
+- Organizer-supplied link fields (`mapUrl`) must pass `safeHttpUrl()` from `@/lib/url`: only http(s) is accepted (400 otherwise), and the renderer re-checks before putting it in an `href`.
 - All list/GET responses return plain JSON. Errors: `{ error: string }` with proper status (400/401/403/404/409/500).
 - Client fetches via `apiGet<T>(path)` / `apiPost<T>(path, body)` / `apiPut<T>` / `apiDelete<T>` from `@/lib/api` (credentials: 'include', throws Error(message) on !ok).
 - Dates are ISO strings over the wire (JSON). `startTime`/`endTime` are plain strings "HH:mm".
@@ -31,8 +33,8 @@ Ticket status: `ACTIVE | CHECKED_IN | CANCELLED | INVALID`.
 
 ## 2. Auth & Cookies
 
-- JWT signed HS256, secret `process.env.AUTH_SECRET || 'ticketbd-dev-secret'`, payload `{ sub: userId, role }`, 7d.
-- Cookie: `ticketbd_token`, httpOnly, path '/', sameSite 'lax', maxAge 7d. Set via `NextResponse` cookies API: `const res = NextResponse.json(...); res.cookies.set('ticketbd_token', token, {...})`.
+- JWT signed HS256, secret `process.env.AUTH_SECRET`, payload `{ sub: userId, role }`, 7d. **AUTH_SECRET is required in production** (min 32 chars); a dev-only fallback is used when `NODE_ENV !== 'production'`, and signing/verifying throws in production if it is missing or too short.
+- Cookie: `ticketbd_token`, httpOnly, path '/', sameSite 'lax', maxAge 7d, **`secure` in production** (off elsewhere so http://localhost works). Set via the shared `sessionCookieOptions(maxAge?)` helper in `@/lib/auth` so login/register/logout cannot drift apart. Set via `NextResponse` cookies API: `const res = NextResponse.json(...); res.cookies.set('ticketbd_token', token, {...})`.
 - `getAuthUser()` (from `@/lib/auth`, server-only) returns full User row or null (reads cookie via `cookies()` from next/headers — must `await cookies()`).
 - Suspended users cannot log in: return 403 `{ error: 'Your account has been suspended' }`.
 
@@ -43,7 +45,7 @@ model User { id, name, email @unique, phone?, password, role default CUSTOMER, s
 model Organizer { id, userId @unique, user, organizationName, phone?, status default PENDING, createdAt, events Event[], createdStaff User[] }
 model Event { id, organizerId, organizer, title, description, category, banner?, startDate DateTime, endDate DateTime, startTime String, endTime String, venue, address, city, mapUrl?, status default DRAFT, featured Boolean default false, createdAt, updatedAt, ticketTypes TicketType[], orders Order[], tickets Ticket[], staffAssignments StaffAssignment[] }
 model TicketType { id, eventId, event (cascade), name, description?, price Float, totalQuantity Int, soldQuantity Int default 0, maxPerOrder Int default 5, salesStart DateTime?, salesEnd DateTime?, createdAt, tickets Ticket[] }
-model Order { id, orderNumber @unique, userId, user, eventId, event, subtotal Float, platformFee Float, totalAmount Float, paymentStatus default PENDING, status default CREATED, createdAt, tickets Ticket[], payments Payment[] }
+model Order { id, orderNumber @unique, userId, user, eventId, event, subtotal Float, platformFee Float, totalAmount Float, paymentStatus default PENDING, status default CREATED, attendeeName?, attendeeEmail?, attendeePhone?, createdAt, tickets Ticket[], payments Payment[] }
 model Ticket { id, orderId, order, eventId, event, ticketTypeId, ticketType, userId, user, attendeeName, ticketCode @unique, qrToken @unique, status default ACTIVE, checkedInAt?, checkedInById? (User relation "CheckedInBy"), createdAt }
 model Payment { id, orderId, order, amount Float, provider default "SSLCOMMERZ", method?, transactionId?, status default PENDING, paidAt?, createdAt }
 model StaffAssignment { id, userId, user, eventId, event, createdAt, @@unique([userId, eventId]) }
@@ -60,12 +62,12 @@ model StaffAssignment { id, userId, user, eventId, event, createdAt, @@unique([u
 - `POST /api/auth/logout` → `{ ok: true }` (clears cookie).
 - `GET /api/auth/me` → `{ user }` with `organizer` included when role=ORGANIZER, and `staffAssignments: { eventId, event: { id, title, status, startDate } }[]` when role=EVENT_STAFF. `{ user: null }` when no session (200, not 401).
 - `PUT /api/auth/profile` body `{ name?, phone?, currentPassword?, newPassword? }` → `{ user }`. If newPassword provided, currentPassword required & verified (400 otherwise).
-- `POST /api/auth/forgot` body `{ email }` → demo mode: generates 6-digit code, stores on user (resetCode, resetCodeExpiry +10min). Always 200. Returns `{ ok: true, resetCode: string }` — demo shortcut since no email service.
+- `POST /api/auth/forgot` body `{ email }` → generates 6-digit code, stores on user (resetCode, resetCodeExpiry +10min). Always 200 with an identical shape (no account enumeration). Returns `{ ok: true, resetCode }` **only in demo mode**; otherwise `{ ok: true }` with the code withheld. Demo mode = non-production, or `DEMO_PASSWORD_RESET=true`; `DEMO_PASSWORD_RESET=false` forces it off. In production the code needs a real email/SMS delivery step (not yet wired up) — echoing it to the caller would let anyone reset any account.
 - `POST /api/auth/reset` body `{ email, code, newPassword }` → validates code+expiry, updates password, clears code → `{ ok: true }` or 400.
 
 ### Events (public)
 - `GET /api/events?search=&category=&city=&sort=upcoming|popular&featured=true`
-  - Only status `PUBLISHED`. search matches title/description (contains, insensitive).
+  - Status `PUBLISHED` **or `ONGOING`** (a live event is still on sale), and only events whose `endDate` has not passed — ended events drop out of the listing without needing to be marked COMPLETED. search matches title/description (contains, insensitive).
   - sort=popular → order by total soldQuantity desc (aggregate ticketTypes soldQuantity sum).
   - Include: `ticketTypes` (all fields), `organizer: { include: { user: { select: { name } } } }`.
   - Response: `{ events: EventListItem[] }` where EventListItem = Event + ticketTypes[] + organizer { organizationName, user: { name } }.
@@ -76,21 +78,21 @@ model StaffAssignment { id, userId, user, eventId, event, createdAt, @@unique([u
 ### Orders & Payments
 - `POST /api/orders` body `{ eventId, items: [{ ticketTypeId, quantity }], attendee: { name, email, phone } }`
   - Guards (400 with clear message): event exists & status PUBLISHED/ONGOING; per-type salesStart/salesEnd window; `quantity <= maxPerOrder`; `quantity <= totalQuantity - soldQuantity`; attendee fields present.
-  - Creates Order (orderNumber `ORD-` + year + `-` + 6 random digits, subtotal, platformFee, totalAmount) + Payment(status PENDING, provider SSLCOMMERZ, amount totalAmount).
+  - Creates Order (orderNumber `ORD-` + year + `-` + 6 random digits, subtotal, platformFee, totalAmount, **attendeeName/attendeeEmail/attendeePhone persisted from `attendee`**) + Payment(status PENDING, provider SSLCOMMERZ, amount totalAmount).
   - Response `{ order: { id, orderNumber, subtotal, platformFee, totalAmount, eventId } }` (201).
 - `GET /api/orders/mine` → `{ orders: OrderWithDetails[] }` — own orders, desc by createdAt. Include event (with venue, city, banner, startDate, endDate, startTime, endTime, title), tickets[] (id, ticketCode, qrToken, attendeeName, status, checkedInAt, ticketType: { name, price }), payments[0]. 
 - `GET /api/orders/[id]` → `{ order }` same include shape (owner or admin only, else 403). Used as server-side payment verification.
 - `POST /api/payments/execute` body `{ orderId, method: 'bKash'|'Nagad'|'CARD', outcome?: 'SUCCESS'|'FAILED' }` (outcome defaults SUCCESS). This endpoint simulates the SSLCOMMERZ gateway completing AND the IPN hitting our backend — it performs ALL server-side verification. Steps:
   1. Load order + payment. If payment.status === 'PAID' → idempotent: return `{ status: 'PAID', orderId }`.
   2. outcome FAILED → payment status FAILED, order paymentStatus FAILED → `{ status: 'FAILED' }`.
-  3. SUCCESS → `db.$transaction`: re-check inventory per item (if insufficient → payment FAILED, order FAILED, return `{ status: 'FAILED', error: 'Insufficient tickets' }`); create tickets; increment soldQuantity.
+  3. SUCCESS → `db.$transaction`: claim inventory per item with a single conditional `UPDATE "TicketType" SET soldQuantity = soldQuantity + n WHERE id = ? AND eventId = ? AND soldQuantity + n <= totalQuantity` (checking and incrementing atomically so concurrent payments cannot oversell). 0 affected rows → throw, rolling the transaction back, then mark payment/order FAILED in a separate write and return `{ status: 'FAILED', error: 'Insufficient tickets' }`; otherwise create tickets.
   4. transactionId = `SSL` + timestamp + 4 random digits. payment → PAID + method + transactionId + paidAt. order → paymentStatus PAID.
-  5. Ticket creation: ticketCode = `EVT-${year}-${6-digit zero-padded unique number}` (loop: pick random 1..999999, check uniqueness, retry), qrToken = `qr_` + 24 hex chars (crypto.randomBytes), attendeeName from `attendee.name`.
+  5. Ticket creation: ticketCode = `EVT-${year}-${6-digit zero-padded unique number}` (loop: pick random 1..999999, check uniqueness, retry), qrToken = `qr_` + 24 hex chars (crypto.randomBytes), attendeeName from `order.attendeeName` (falling back to the buyer's name for legacy orders).
   - Response `{ status: 'PAID'|'FAILED', orderId, error?: string }`.
-- `GET /api/payments/status?orderId=` → `{ status: payment.status, paymentStatus: order.paymentStatus }` (owner).
+- ~~`GET /api/payments/status?orderId=`~~ — **removed.** The simulated gateway awaits `/api/payments/execute` directly, so nothing ever polled it. Re-add it if a real gateway redirect/IPN flow needs polling.
 
 ### Upload
-- `POST /api/upload` body `{ dataUrl: string }` (image data URL, client-side compressed). Validates startsWith('data:image/'), size < 1.5MB. Writes decoded buffer to `public/uploads/upl_${Date.now()}_${rand4}.${ext}` (ext from mime jpeg/png/webp). Response `{ url: '/uploads/upl_xxx.jpg' }`. Create `public/uploads` dir if missing (fs.mkdir recursive).
+- `POST /api/upload` body `{ dataUrl: string }` (image data URL, client-side compressed). **Requires role ORGANIZER or SUPER_ADMIN.** Validates startsWith('data:image/'), decoded size < 1.5MB, mime in jpeg/png/webp. Writes decoded buffer to `public/uploads/upl_${Date.now()}_${rand4}.${ext}`. Response `{ url: '/uploads/upl_xxx.jpg' }`. Creates `public/uploads` if missing (fs.mkdir recursive). Returns 503 with an actionable message on read-only/serverless filesystems (e.g. Vercel), where runtime-written files are not served.
 
 ### Organizer (all require role ORGANIZER; Organizer row must be status APPROVED except for GET endpoints which work but frontend shows pending banner)
 - `GET /api/organizer/stats` → `{ stats: { totalEvents, activeEvents (PUBLISHED|ONGOING), ticketsSold (sum soldQuantity), revenue (sum totalAmount where paymentStatus PAID), checkIns (count tickets CHECKED_IN), pendingApprovals? } }`
@@ -113,13 +115,14 @@ model StaffAssignment { id, userId, user, eventId, event, createdAt, @@unique([u
 ### Admin (require SUPER_ADMIN)
 - `GET /api/admin/stats` → `{ stats: { totalUsers, totalCustomers, totalOrganizers, totalStaff, totalEvents, publishedEvents, pendingEvents, totalOrders, paidOrders, totalRevenue, totalTicketsSold, totalCheckIns } }`
 - `GET /api/admin/users?role=&q=` → `{ users: [...] }` include organizer (when ORGANIZER). desc createdAt. q filters name/email contains.
-- `PUT /api/admin/users/[id]` body `{ status: 'ACTIVE'|'SUSPENDED' }` → `{ user }`. Cannot suspend self (400).
+- `PUT /api/admin/users/[id]` body `{ status: 'ACTIVE'|'SUSPENDED' }` → `{ user }`. Cannot suspend self (400); **cannot suspend any SUPER_ADMIN (403)** so admins cannot lock each other out.
 - `GET /api/admin/organizers?status=` → `{ organizers: [{ ...Organizer, user: { id, name, email, phone, status }, eventCount }] }` desc createdAt.
 - `PUT /api/admin/organizers/[id]` body `{ status: 'APPROVED'|'REJECTED'|'PENDING' }` → `{ organizer }`.
 - `GET /api/admin/events?status=&q=` → `{ events: [...] }` include organizer { organizationName, user: { name } } + ticketTypes.
 - `PUT /api/admin/events/[id]` body `{ action: 'approve'|'reject'|'suspend'|'feature'|'unfeature' }`
   - approve → status PUBLISHED; reject → REJECTED; suspend → SUSPENDED; feature/unfeature → featured true/false (no status change).
   - Also allow body `{ action: 'restore' }` → back to PUBLISHED. Response `{ event }`.
+  - **Transitions are guarded by current status** (400 otherwise), matching what the dashboard offers: approve from PENDING_APPROVAL/REJECTED/SUSPENDED, reject from PENDING_APPROVAL, suspend from PUBLISHED/ONGOING, restore from SUSPENDED. feature/unfeature are allowed from any status.
 
 ### Staff (require EVENT_STAFF)
 - `GET /api/staff/assignments` → `{ assignments: [{ id, event: { id, title, venue, city, banner, startDate, startTime, status, ticketTypes: { select: { totalQuantity, soldQuantity } } }, checkedInCount, totalTickets }] }` for this user.
@@ -153,7 +156,7 @@ useAppStore: { user: SafeUser|null, authLoaded: boolean, view: View, authOpen: b
 ### Shared components — `@/components/app/*` (already written)
 - `EventCard({ event: EventListItem, onSelect?: (id) => void })` — banner, date badge, category chip, title, venue/city, "From ৳X", sold progress. Clicking navigates to event-detail (or calls onSelect).
 - `EmptyState({ icon, title, description, action? })`.
-- Helpers: `formatBDT(n)` → `৳1,500`; `formatEventDate(iso)` → `Fri, 20 Feb 2026`; `formatTime('18:00')` → `6:00 PM`; `categoryIcon(cat)`, `categoryLabel(cat)`, `statusBadgeVariant`, from `@/lib/format` & `@/lib/constants`.
+- Helpers: `formatBDT(n)` → `৳1,500`; `formatEventDate(iso)` → `Fri, 20 Feb 2026`; `formatTime('18:00')` → `6:00 PM`; `daysUntil(startIso, endIso?)` → `3 days left` / `Happening now` (when between start and end) / `Ended`; `categoryIcon(cat)`, `categoryLabel(cat)`, `statusBadgeVariant`, from `@/lib/format` & `@/lib/constants`.
 
 ### Shared types — `@/lib/types` (already written): EventListItem, EventDetail, TicketTypeDTO, OrderDTO, TicketDTO, SafeUser, OrganizerProfile, StaffAssignmentDTO, AdminStats, OrganizerStats, etc.
 

@@ -25,7 +25,7 @@ export function EventCard({ event }: { event: EventListItem }) {
   const sold = totalSold(event)
   const qty = totalQty(event)
   const pct = qty > 0 ? Math.min(100, Math.round((sold / qty) * 100)) : 0
-  const dateLabel = daysUntil(event.startDate)
+  const dateLabel = daysUntil(event.startDate, event.endDate)
 
   return (
     <button

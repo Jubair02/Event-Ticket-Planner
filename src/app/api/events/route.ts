@@ -3,7 +3,13 @@ import { db } from '@/lib/db'
 
 /**
  * GET /api/events?search=&category=&city=&sort=upcoming|popular&featured=true
- * Public listing — only PUBLISHED events.
+ *
+ * Public listing. Shows PUBLISHED *and* ONGOING events — an event that is
+ * happening right now is still on sale (the detail route and order creation
+ * both accept ONGOING), so hiding it would make it vanish mid-event.
+ * Events whose endDate has passed are excluded so they stop being listed as
+ * upcoming; organizers do not have to mark them COMPLETED for that to happen.
+ *
  * Note: Postgres `contains` is case-sensitive, so `mode: 'insensitive'` is required.
  */
 export async function GET(req: NextRequest) {
@@ -15,7 +21,10 @@ export async function GET(req: NextRequest) {
     const sort = sp.get('sort') === 'popular' ? 'popular' : 'upcoming'
     const featured = sp.get('featured') === 'true'
 
-    const where: Record<string, unknown> = { status: 'PUBLISHED' }
+    const where: Record<string, unknown> = {
+      status: { in: ['PUBLISHED', 'ONGOING'] },
+      endDate: { gte: new Date() },
+    }
     if (category) where.category = category
     if (city) where.city = city
     if (featured) where.featured = true

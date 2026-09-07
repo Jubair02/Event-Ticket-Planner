@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Info, Loader2, Plus, ShieldOff, Trash2, UserCheck, Users } from 'lucide-react'
@@ -159,8 +159,6 @@ export function StaffManager() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
-
-  // Initialize dialog selection at open time (event-driven — no setState-in-effect)
 
   const creating = createMutation.isPending
 

@@ -99,6 +99,10 @@ export interface OrderDTO {
   totalAmount: number
   paymentStatus: 'PENDING' | 'PROCESSING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUNDED'
   status: string
+  /** Attendee captured at checkout; null on orders created before this existed. */
+  attendeeName?: string | null
+  attendeeEmail?: string | null
+  attendeePhone?: string | null
   createdAt: string
   event?: {
     id: string

@@ -1,12 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { EVENT_STATUS_LABELS } from '@/lib/constants'
 
 const ACTION_STATUS: Record<string, string | undefined> = {
   approve: 'PUBLISHED',
   restore: 'PUBLISHED',
   reject: 'REJECTED',
   suspend: 'SUSPENDED',
+}
+
+/**
+ * Which statuses each moderation action may be applied from, mirroring what the
+ * admin dashboard offers. Without this the API would happily publish an event
+ * the organizer never submitted (e.g. approve straight from DRAFT).
+ * feature/unfeature are not transitions, so they are allowed from any status.
+ */
+const ALLOWED_FROM: Record<string, string[]> = {
+  approve: ['PENDING_APPROVAL', 'REJECTED', 'SUSPENDED'],
+  reject: ['PENDING_APPROVAL'],
+  suspend: ['PUBLISHED', 'ONGOING'],
+  restore: ['SUSPENDED'],
 }
 
 /** PUT /api/admin/events/[id] — moderation actions on an event. */
@@ -21,6 +35,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const event = await db.event.findUnique({ where: { id } })
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+
+    const allowedFrom = ALLOWED_FROM[action]
+    if (allowedFrom && !allowedFrom.includes(event.status)) {
+      const label = EVENT_STATUS_LABELS[event.status] ?? event.status
+      return NextResponse.json(
+        { error: `Cannot ${action} an event that is ${label}` },
+        { status: 400 }
+      )
+    }
 
     const data: { status?: string; featured?: boolean } = {}
     if (action === 'feature') data.featured = true
