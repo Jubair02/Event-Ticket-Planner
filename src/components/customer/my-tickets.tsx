@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmptyState } from '@/components/app/empty-state'
+import { TicketStatusBadge } from '@/components/customer/ticket-status-badge'
 
 type TabKey = 'upcoming' | 'past' | 'cancelled'
 
@@ -23,17 +24,6 @@ interface TicketRow {
   event: NonNullable<OrderDTO['event']>
 }
 
-function statusBadge(status: TicketDTO['status']): {
-  variant: 'default' | 'outline' | 'destructive'
-  label: string
-  className?: string
-} {
-  if (status === 'ACTIVE') return { variant: 'outline', label: 'Valid', className: 'border-primary/50 text-primary' }
-  if (status === 'CHECKED_IN') return { variant: 'default', label: 'Checked In' }
-  if (status === 'CANCELLED') return { variant: 'destructive', label: 'Cancelled' }
-  return { variant: 'destructive', label: 'Invalid' }
-}
-
 function isCancelledRow(r: TicketRow): boolean {
   return r.ticket.status === 'CANCELLED' || r.ticket.status === 'INVALID' || r.event.status === 'CANCELLED'
 }
@@ -41,7 +31,6 @@ function isCancelledRow(r: TicketRow): boolean {
 function TicketRowCard({ row }: { row: TicketRow }) {
   const navigate = useAppStore((s) => s.navigate)
   const { ticket, event } = row
-  const badge = statusBadge(ticket.status)
 
   return (
     <Card className="p-4">
@@ -81,9 +70,7 @@ function TicketRowCard({ row }: { row: TicketRow }) {
           <Badge variant="outline">{ticket.ticketType?.name ?? 'Ticket'}</Badge>
           <span className="font-mono text-xs text-muted-foreground">{ticket.ticketCode}</span>
           <span className="text-xs text-muted-foreground">· {ticket.attendeeName}</span>
-          <Badge variant={badge.variant} className={badge.className}>
-            {badge.label}
-          </Badge>
+          <TicketStatusBadge status={ticket.status} />
         </div>
         <Button size="sm" onClick={() => navigate({ name: 'ticket-detail', ticketId: ticket.id })}>
           View Ticket

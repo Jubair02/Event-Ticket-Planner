@@ -167,6 +167,7 @@ export interface AdminStats {
   totalEvents: number
   publishedEvents: number
   pendingEvents: number
+  pendingOrganizers: number
   totalOrders: number
   paidOrders: number
   totalRevenue: number

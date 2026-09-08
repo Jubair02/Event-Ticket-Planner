@@ -13,23 +13,12 @@ import {
 import { apiGet } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { categoryEmoji, formatBDT, formatEventDate, formatTime } from '@/lib/format'
-import type { OrderDTO, TicketDTO } from '@/lib/types'
-import { Badge } from '@/components/ui/badge'
+import type { OrderDTO } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { EmptyState } from '@/components/app/empty-state'
-
-function ticketStatusBadge(status: TicketDTO['status']): {
-  variant: 'default' | 'outline' | 'destructive'
-  label: string
-  className?: string
-} {
-  if (status === 'ACTIVE') return { variant: 'outline', label: 'Valid', className: 'border-primary/50 text-primary' }
-  if (status === 'CHECKED_IN') return { variant: 'default', label: 'Checked In' }
-  if (status === 'CANCELLED') return { variant: 'destructive', label: 'Cancelled' }
-  return { variant: 'destructive', label: 'Invalid' }
-}
+import { TicketStatusBadge } from '@/components/customer/ticket-status-badge'
 
 export function PaymentSuccess({ orderId }: { orderId: string }) {
   const navigate = useAppStore((s) => s.navigate)
@@ -187,7 +176,6 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
           ) : (
             <div className="space-y-3">
               {tickets.map((ticket) => {
-                const badge = ticketStatusBadge(ticket.status)
                 return (
                   <div
                     key={ticket.id}
@@ -199,9 +187,7 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
                       <p className="font-mono text-xs text-muted-foreground">{ticket.ticketCode}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <Badge variant={badge.variant} className={badge.className}>
-                        {badge.label}
-                      </Badge>
+                      <TicketStatusBadge status={ticket.status} />
                       <Button
                         size="sm"
                         variant="outline"

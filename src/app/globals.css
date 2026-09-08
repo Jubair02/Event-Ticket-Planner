@@ -154,6 +154,9 @@
   width: 24px;
   height: 24px;
   background: var(--background);
+  /* The fill matches the page, not the card, so the circle reads as a cut-out.
+     The hairline keeps that legible when the two are nearly the same value. */
+  border: 1px solid var(--border);
   border-radius: 9999px;
   top: 50%;
   transform: translateY(-50%);
@@ -168,18 +171,44 @@
 
 /* Print only the ticket */
 @media print {
+  @page {
+    margin: 12mm;
+  }
+  html,
+  body {
+    /* Collapse the app's scroll height so only the ticket page is emitted. */
+    height: auto !important;
+    overflow: hidden !important;
+    background: #fff !important;
+  }
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
+    box-shadow: none !important;
   }
   .print-ticket,
   .print-ticket * {
-    visibility: visible;
+    visibility: visible !important;
   }
   .print-ticket {
-    position: absolute;
-    inset: 0;
-    margin: 24px auto;
-    width: 420px;
+    /* Fixed rather than absolute: the ticket stops contributing to document
+       height (the cause of the blank trailing pages), and the width follows
+       the paper instead of a hardcoded 420px. */
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: auto !important;
+    max-width: 460px !important;
+    margin: 0 auto !important;
+    border: 1px solid #dddddd !important;
+    /* Keep the QR and banner from being stripped by "economy" print modes. */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* The punch-outs print as grey blobs on paper — the dashed rule is enough. */
+  .ticket-notch::before,
+  .ticket-notch::after {
+    display: none !important;
   }
 }
 
