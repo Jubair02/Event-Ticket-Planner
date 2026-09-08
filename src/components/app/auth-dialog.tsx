@@ -27,7 +27,7 @@ const DEMO_ACCOUNTS = [
 ]
 
 export function AuthDialog() {
-  const { authOpen, authMode, setAuthOpen, setUser, navigate } = useAppStore()
+  const { authOpen, authMode, setAuthOpen, setUser, navigate, consumeAuthReturnTo } = useAppStore()
   const [tab, setTab] = useState<'login' | 'register' | 'forgot'>(authMode)
   const [loading, setLoading] = useState(false)
 
@@ -59,10 +59,14 @@ export function AuthDialog() {
   }
 
   function afterAuth(user: SafeUser) {
+    // Read the pending target before closing, because closing clears it.
+    // If auth interrupted something (e.g. tapping Buy on an event), go back
+    // there instead of dropping the user on their role's landing page.
+    const returnTo = consumeAuthReturnTo()
     setUser(user)
     setAuthOpen(false)
-    toast.success(`Welcome, ${user.name}!`)
-    navigate(landingViewForRole(user.role))
+    toast.success(`Welcome, ${user.name}`)
+    navigate(returnTo ?? landingViewForRole(user.role))
   }
 
   async function handleLogin(e?: React.FormEvent) {

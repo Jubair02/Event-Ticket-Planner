@@ -25,7 +25,7 @@ const ROLE_LABELS: Record<string, string> = {
 }
 
 export function Navbar() {
-  const { user, view, navigate, openAuth, setUser } = useAppStore()
+  const { user, view, navigate, openAuth, setUser, setProfileOpen } = useAppStore()
   const { theme, setTheme } = useTheme()
 
   const active = view.name
@@ -148,7 +148,7 @@ export function Navbar() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate({ name: 'profile' })}>
+                <DropdownMenuItem onClick={() => setProfileOpen(true)}>
                   <UserCircle className="h-4 w-4" /> Profile
                 </DropdownMenuItem>
                 {user.role === 'CUSTOMER' && (

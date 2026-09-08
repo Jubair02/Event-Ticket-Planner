@@ -34,6 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { EmptyState } from '@/components/app/empty-state'
+import { ticketWindow } from '@/lib/ticket-window'
 
 interface CreateOrderResponse {
   order: {
@@ -46,34 +47,13 @@ interface CreateOrderResponse {
   }
 }
 
-interface TicketWindow {
-  available: number
-  soldOut: boolean
-  closed: boolean
-  notOpen: boolean
-  max: number
-  purchasable: boolean
-}
-
-function ticketWindow(t: TicketTypeDTO): TicketWindow {
-  const now = Date.now()
-  const available = Math.max(0, t.totalQuantity - t.soldQuantity)
-  const closed = t.salesEnd ? new Date(t.salesEnd).getTime() < now : false
-  const notOpen = t.salesStart ? new Date(t.salesStart).getTime() > now : false
-  const max = Math.min(t.maxPerOrder, available)
-  return {
-    available,
-    soldOut: available <= 0,
-    closed,
-    notOpen,
-    max,
-    purchasable: available > 0 && !closed && !notOpen,
-  }
-}
-
 export function Checkout({ eventId }: { eventId: string }) {
   const navigate = useAppStore((s) => s.navigate)
   const user = useAppStore((s) => s.user)
+  const view = useAppStore((s) => s.view)
+
+  // Selection handed over from the event page, when the user came that way.
+  const handoffItems = view.name === 'checkout' && view.eventId === eventId ? view.items : undefined
 
   const [name, setName] = useState(() => user?.name ?? '')
   const [email, setEmail] = useState(() => user?.email ?? '')
@@ -89,24 +69,37 @@ export function Checkout({ eventId }: { eventId: string }) {
   })
   const event = query.data?.event
 
-  // Default selection: first purchasable ticket type gets qty 1, the rest 0
-  // (derived until the user interacts — no setState-in-effect needed)
+  // Initial selection, derived until the user interacts (no setState-in-effect):
+  // honour what was picked on the event page, clamped to what is still
+  // available, and only fall back to "1 of the first purchasable type" when
+  // the user arrived without a selection.
   const effQtys = useMemo<Record<string, number>>(() => {
     if (!event) return {}
     if (initedRef.current === event.id) return qtys
+
+    const requested = new Map((handoffItems ?? []).map((i) => [i.ticketTypeId, i.quantity]))
     const initial: Record<string, number> = {}
-    let firstDone = false
+    let seeded = false
     for (const t of event.ticketTypes) {
       const win = ticketWindow(t)
-      if (!firstDone && win.purchasable) {
-        initial[t.id] = 1
-        firstDone = true
+      const want = requested.get(t.id) ?? 0
+      if (win.purchasable && want > 0) {
+        initial[t.id] = Math.min(want, win.max)
+        seeded = true
       } else {
         initial[t.id] = 0
       }
     }
+    if (!seeded) {
+      for (const t of event.ticketTypes) {
+        if (ticketWindow(t).purchasable) {
+          initial[t.id] = 1
+          break
+        }
+      }
+    }
     return initial
-  }, [event, qtys])
+  }, [event, qtys, handoffItems])
 
   const subtotal = useMemo(
     () => (event ? event.ticketTypes.reduce((acc, t) => acc + (effQtys[t.id] ?? 0) * t.price, 0) : 0),

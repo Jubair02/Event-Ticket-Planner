@@ -147,11 +147,13 @@ type View =
   | { name: 'organizer'; tab?: 'overview'|'events'|'staff' }
   | { name: 'admin'; tab?: 'overview'|'organizers'|'events'|'users' }
   | { name: 'staff' }
-  | { name: 'profile' }
 
 useAppStore: { user: SafeUser|null, authLoaded: boolean, view: View, authOpen: boolean, authMode: 'login'|'register',
-  setUser, navigate(view), openAuth(mode?), setAuthOpen(open), logout() }
+  profileOpen: boolean,
+  setUser, navigate(view), openAuth(mode?), setAuthOpen(open), setProfileOpen(open), logout() }
 ```
+Auth and profile are **overlays, not views**: they layer over whatever page is
+mounted, so dismissing one returns you there. `navigate()` closes both.
 
 ### Shared components — `@/components/app/*` (already written)
 - `EventCard({ event: EventListItem, onSelect?: (id) => void })` — banner, date badge, category chip, title, venue/city, "From ৳X", sold progress. Clicking navigates to event-detail (or calls onSelect).

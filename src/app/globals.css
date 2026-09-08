@@ -182,3 +182,13 @@
     width: 420px;
   }
 }
+
+/* Identity band: ambient tint + fine grain behind the profile dialog header.
+   Built from theme tokens, so it reads correctly in light and dark. */
+.identity-band {
+  background-image:
+    radial-gradient(115% 130% at 8% -10%, color-mix(in oklab, var(--primary) 16%, transparent), transparent 60%),
+    radial-gradient(90% 110% at 100% 0%, color-mix(in oklab, var(--chart-2) 12%, transparent), transparent 55%),
+    radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--foreground) 7%, transparent) 1px, transparent 0);
+  background-size: 100% 100%, 100% 100%, 20px 20px;
+}
