@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { useAppStore, landingViewForRole } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import { useAppStore } from '@/lib/store'
+import { landingPathForRole } from '@/lib/routes'
 import { apiPost, ApiError } from '@/lib/api'
 import {
   Dialog,
@@ -14,20 +16,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
-import { Loader2, ShieldCheck, Sparkles, Ticket, UserRound, Zap } from 'lucide-react'
+import { Loader2, Sparkles, Ticket, UserRound } from 'lucide-react'
 import type { SafeUser } from '@/lib/types'
 
-const DEMO_ACCOUNTS = [
-  { label: 'Admin', email: 'admin@ticketbd.com', password: 'admin123', icon: ShieldCheck, color: 'text-chart-4' },
-  { label: 'Organizer', email: 'organizer@ticketbd.com', password: 'organizer123', icon: Sparkles, color: 'text-primary' },
-  { label: 'Customer', email: 'customer@ticketbd.com', password: 'customer123', icon: UserRound, color: 'text-chart-2' },
-  { label: 'Staff', email: 'staff@ticketbd.com', password: 'staff123', icon: Zap, color: 'text-chart-5' },
-]
-
 export function AuthDialog() {
-  const { authOpen, authMode, setAuthOpen, setUser, navigate, consumeAuthReturnTo } = useAppStore()
+  const { authOpen, authMode, setAuthOpen, setUser, consumeAuthReturnTo } = useAppStore()
+  const router = useRouter()
   const [tab, setTab] = useState<'login' | 'register' | 'forgot'>(authMode)
   const [loading, setLoading] = useState(false)
 
@@ -66,7 +61,7 @@ export function AuthDialog() {
     setUser(user)
     setAuthOpen(false)
     toast.success(`Welcome, ${user.name}`)
-    navigate(returnTo ?? landingViewForRole(user.role))
+    router.push(returnTo ?? landingPathForRole(user.role))
   }
 
   async function handleLogin(e?: React.FormEvent) {
@@ -78,20 +73,6 @@ export function AuthDialog() {
         email: loginEmail,
         password: loginPassword,
       })
-      afterAuth(data.user)
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Login failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function quickLogin(email: string, password: string) {
-    setLoginEmail(email)
-    setLoginPassword(password)
-    setLoading(true)
-    try {
-      const data = await apiPost<{ user: SafeUser }>('/api/auth/login', { email, password })
       afterAuth(data.user)
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Login failed')
@@ -230,27 +211,6 @@ export function AuthDialog() {
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />} Login
               </Button>
             </form>
-
-            <div className="flex items-center gap-2">
-              <Separator className="flex-1" />
-              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Demo accounts</span>
-              <Separator className="flex-1" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_ACCOUNTS.map((d) => (
-                <Button
-                  key={d.label}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="justify-start"
-                  disabled={loading}
-                  onClick={() => quickLogin(d.email, d.password)}
-                >
-                  <d.icon className={`h-4 w-4 ${d.color}`} /> {d.label}
-                </Button>
-              ))}
-            </div>
           </TabsContent>
 
           {/* REGISTER */}

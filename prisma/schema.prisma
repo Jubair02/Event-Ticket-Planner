@@ -7,6 +7,28 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =============================================================================
+// Money
+//
+// Every monetary column in this schema is a `BigInt` count of **paisa**
+// (1 BDT = 100 paisa) and is named with a `Minor` suffix. There are no Float
+// money columns: floats cannot hold decimal fractions exactly, so a subtotal
+// summed from them drifts, and a commission computed off a drifted subtotal is
+// wrong in a way nobody notices until a payout is disputed.
+//
+// `BigInt` rather than `Int` because payout, settlement and ledger amounts
+// accumulate across every order an organizer has ever sold, and `Int` tops out
+// at ৳21,474,836.47. `src/lib/money.ts` is the only place that converts
+// between paisa and human-readable taka.
+//
+// Status columns are `String` with the allowed values listed in a comment,
+// matching the convention the rest of this schema already uses. The values are
+// narrowed to unions in `src/lib/types.ts`, validated on write, and the
+// financial tables additionally carry database CHECK constraints (applied by
+// `prisma/sql/002-financial-constraints.sql`) so an out-of-range amount or an
+// unbalanced ledger group cannot be written even by a raw query.
+// =============================================================================
+
 model User {
   id                    String   @id @default(cuid())
   name                  String
@@ -27,6 +49,14 @@ model User {
   orders           Order[]
   tickets          Ticket[]
   checkedInTickets Ticket[]          @relation("CheckedInBy")
+
+  // Refunds received as the paying customer, plus the operator trail: who
+  // requested, approved and pushed each refund to the gateway.
+  refunds            Refund[]         @relation("RefundCustomer")
+  refundsRequested   Refund[]         @relation("RefundRequestedBy")
+  refundsApproved    Refund[]         @relation("RefundApprovedBy")
+  refundsProcessed   Refund[]         @relation("RefundProcessedBy")
+  refundAuditEntries RefundAuditLog[] @relation("RefundAuditActor")
 }
 
 model Organizer {
@@ -40,6 +70,10 @@ model Organizer {
 
   events      Event[]
   createdStaff User[] @relation("CreatedStaff")
+
+  payoutMethods PayoutMethod[]
+  payouts       Payout[]
+  settlements   Settlement[]
 }
 
 model Event {
@@ -47,6 +81,11 @@ model Event {
   organizerId String
   organizer   Organizer @relation(fields: [organizerId], references: [id])
   title       String
+  /// Stable URL slug, generated once at creation and never regenerated on
+  /// rename so permalinks do not break. Nullable so the column could be added
+  /// to live data without a NOT NULL migration; every creation path sets it,
+  /// and URLs fall back to the id when it is somehow absent.
+  slug        String?  @unique
   description String
   category    String // CONCERT | TECH | WORKSHOP | SPORTS | CULTURAL | BUSINESS | GAMING | FOOD
   banner      String?
@@ -67,6 +106,8 @@ model Event {
   orders           Order[]
   tickets          Ticket[]
   staffAssignments StaffAssignment[]
+  settlements      Settlement[]
+  refunds          Refund[]
 }
 
 model TicketType {
@@ -75,7 +116,8 @@ model TicketType {
   event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
   name          String
   description   String?
-  price         Float
+  /// Unit price in paisa. Capped by MAX_TICKET_PRICE_MINOR on write.
+  priceMinor    BigInt
   totalQuantity Int
   soldQuantity  Int       @default(0)
   maxPerOrder   Int       @default(5)
@@ -93,10 +135,19 @@ model Order {
   user          User     @relation(fields: [userId], references: [id])
   eventId       String
   event         Event    @relation(fields: [eventId], references: [id])
-  subtotal      Float
-  platformFee   Float
-  totalAmount   Float
-  paymentStatus String   @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED
+  /// All four amounts are paisa and satisfy
+  /// `totalMinor = subtotalMinor - discountMinor + platformFeeMinor`,
+  /// enforced by the `Order_total_consistent` CHECK constraint.
+  subtotalMinor    BigInt
+  discountMinor    BigInt @default(0)
+  platformFeeMinor BigInt
+  totalMinor       BigInt
+  currency         String @default("BDT")
+  /// Money already returned to the customer, in paisa. Maintained ONLY by the
+  /// refund engine and used as the ceiling for every further refund, so a run
+  /// of partial refunds can never pay back more than was captured.
+  refundedMinor    BigInt @default(0)
+  paymentStatus String   @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED | PARTIALLY_REFUNDED
   status        String   @default("CREATED")
   // Attendee the tickets are issued to (captured at checkout). Nullable because
   // orders created before this field existed fall back to the buyer's name.
@@ -107,6 +158,7 @@ model Order {
 
   tickets  Ticket[]
   payments Payment[]
+  refunds  Refund[]
 }
 
 model Ticket {
@@ -122,24 +174,45 @@ model Ticket {
   attendeeName String
   ticketCode   String    @unique
   qrToken      String    @unique
-  status       String    @default("ACTIVE") // ACTIVE | CHECKED_IN | CANCELLED | INVALID
+  status       String    @default("ACTIVE") // ACTIVE | CHECKED_IN | CANCELLED | INVALID | REFUNDED
   checkedInAt  DateTime?
   checkedInById String?
   checkedBy    User?     @relation("CheckedInBy", fields: [checkedInById], references: [id])
+  /// Id of the refund that currently owns this ticket's refundable value.
+  /// Deliberately a plain column and not a relation: it is claimed with a
+  /// conditional `UPDATE ... WHERE "refundLockId" IS NULL`, which is what stops
+  /// two concurrent refunds from both including the same ticket. Released again
+  /// when a refund is rejected.
+  refundLockId String?
   createdAt    DateTime  @default(now())
+
+  refundItems  RefundItem[]
+
+  @@index([refundLockId])
 }
 
 model Payment {
   id            String    @id @default(cuid())
   orderId       String
   order         Order     @relation(fields: [orderId], references: [id])
-  amount        Float
+  /// Amount captured from the customer, in paisa. Matches `Order.totalMinor`
+  /// for a full single-payment capture.
+  amountMinor     BigInt
+  /// What the gateway keeps, in paisa. Deducted from the organizer's
+  /// settlement, not from the customer. Zero until the gateway reports it.
+  gatewayFeeMinor BigInt  @default(0)
+  currency        String  @default("BDT")
   provider      String    @default("SSLCOMMERZ")
   method        String?   // bKash | Nagad | CARD
   transactionId String?
-  status        String    @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED
+  status        String    @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED | REFUNDED | PARTIALLY_REFUNDED
   paidAt        DateTime?
+  /// Portion of `amountMinor` reversed through the gateway, in paisa, so one
+  /// capture can never be over-reversed even across several partial refunds.
+  refundedMinor BigInt   @default(0)
   createdAt     DateTime  @default(now())
+
+  refunds Refund[]
 }
 
 model StaffAssignment {
@@ -151,4 +224,339 @@ model StaffAssignment {
   createdAt DateTime @default(now())
 
   @@unique([userId, eventId])
+}
+
+// =============================================================================
+// Financial models
+// =============================================================================
+
+/// Money returned to a customer.
+///
+/// A refund is split at creation into the part clawed back from the organizer
+/// and the part the platform gives up out of its commission, because those two
+/// pots are settled separately and the split cannot be reconstructed later
+/// (fee rates change, and a goodwill refund may be entirely platform-funded).
+/// `amountMinor = organizerShareMinor + platformShareMinor` is a CHECK
+/// constraint, so the ledger group for a refund always balances.
+model Refund {
+  id           String  @id @default(cuid())
+  refundNumber String  @unique
+  orderId      String
+  order        Order   @relation(fields: [orderId], references: [id])
+  /// The capture being reversed. Nullable for an off-gateway refund (cash at
+  /// the venue, a bank transfer) that still has to appear in the ledger.
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+
+  /// Denormalised from the order so the refund desk can filter by event and an
+  /// event-cancellation batch is listable without joining every order.
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id])
+  /// The customer the money goes back to.
+  userId String
+  user   User   @relation("RefundCustomer", fields: [userId], references: [id])
+
+  amountMinor         BigInt
+  organizerShareMinor BigInt
+  platformShareMinor  BigInt
+  currency            String @default("BDT")
+
+  /// How `amountMinor` was arrived at, all in paisa. Stored rather than derived
+  /// for the same reason the share split is: the policy that produced these
+  /// numbers may change, and an old refund still has to be explainable.
+  /// `amountMinor = ticketFaceValueMinor + platformFeeRefundedMinor - processingFeeMinor`.
+  ticketFaceValueMinor     BigInt @default(0)
+  platformFeeRefundedMinor BigInt @default(0)
+  /// Retained, not returned: the cancellation service charge on a voluntary
+  /// refund. Left against the organizer's payable, which is why the customer
+  /// receives less than face value.
+  processingFeeMinor       BigInt @default(0)
+
+  /// FULL | PARTIAL | EVENT_CANCELLATION
+  type String @default("FULL")
+  /// CUSTOMER | ADMIN | SYSTEM - who set this refund in motion.
+  initiatedBy String @default("ADMIN")
+  /// Operator-facing note. Always written; carries the reason label for
+  /// system-generated refunds.
+  reason String
+  /// One of REFUND_REASON_CODES in src/lib/refunds.ts. The code is what the
+  /// policy resolver keys off; `reason` is prose for humans.
+  reasonCode String @default("CUSTOMER_REQUEST")
+  /// Which policy rule priced this refund, e.g. CUSTOMER_TIER_50. A snapshot,
+  /// so re-pricing the policy table cannot rewrite history.
+  policyCode String @default("")
+  /// Why an approver turned it down. Distinct from `failureReason`, which is
+  /// what the gateway said.
+  rejectionReason String?
+
+  status String @default("REQUESTED") // REQUESTED | APPROVED | REJECTED | PROCESSING | COMPLETED | FAILED
+
+  // ---- operators: one per decision, so each step is answerable ----
+  requestedById String?
+  requestedBy   User?   @relation("RefundRequestedBy", fields: [requestedById], references: [id])
+  approvedById  String?
+  approvedBy    User?   @relation("RefundApprovedBy", fields: [approvedById], references: [id])
+  processedById String?
+  processedBy   User?   @relation("RefundProcessedBy", fields: [processedById], references: [id])
+
+  // ---- gateway ----
+  /// The gateway's own id for the reversal. Unique so a callback resolves to
+  /// exactly one refund.
+  providerRefundId     String? @unique
+  provider             String?
+  gatewayStatus        String?
+  gatewayAttempts      Int     @default(0)
+  gatewayLastAttemptAt DateTime?
+  failureReason        String?
+  /// Sent with every submission, so a retry after a timeout cannot pay the
+  /// customer twice.
+  idempotencyKey String @unique @default(cuid())
+
+  /// Groups every refund produced by one event cancellation.
+  batchId String?
+
+  // ---- a timestamp for each state entered ----
+  requestedAt DateTime  @default(now())
+  approvedAt  DateTime?
+  /// When it was handed to the gateway, i.e. when it entered PROCESSING.
+  processedAt DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+  rejectedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items     RefundItem[]
+  auditLogs RefundAuditLog[]
+
+  @@index([orderId])
+  @@index([status, requestedAt])
+  @@index([eventId, status])
+  @@index([userId, requestedAt])
+  @@index([batchId])
+}
+
+/// One ticket inside a refund, priced at the moment the refund was created.
+///
+/// This table is what makes a partial refund expressible as data rather than as
+/// an amount somebody typed: a refund IS its set of tickets, and the money
+/// follows from their prices.
+model RefundItem {
+  id       String @id @default(cuid())
+  refundId String
+  refund   Refund @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id])
+
+  /// Per-ticket breakdown in paisa. Allocated with largest-remainder so the
+  /// items sum to the refund total exactly, with no paisa lost to rounding.
+  faceValueMinor        BigInt
+  platformFeeShareMinor BigInt @default(0)
+  processingFeeMinor    BigInt @default(0)
+  amountMinor           BigInt
+
+  /// The ticket's status when it was pulled in. A CHECKED_IN ticket refunded by
+  /// admin override has to stay visible as such afterwards.
+  ticketStatusAtRefund String
+
+  createdAt DateTime @default(now())
+
+  @@unique([refundId, ticketId])
+  @@index([ticketId])
+}
+
+/// Append-only trail for a refund: every state change and every exchange with
+/// the gateway adds a row. Nothing in the engine updates or deletes one.
+model RefundAuditLog {
+  id       String @id @default(cuid())
+  refundId String
+  refund   Refund @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  /// REQUESTED | APPROVED | REJECTED | GATEWAY_SUBMITTED | GATEWAY_SETTLED |
+  /// GATEWAY_FAILED | RETRIED | WEBHOOK_RECEIVED | TICKETS_RELEASED |
+  /// INVENTORY_RELEASED | LEDGER_POSTED
+  action     String
+  fromStatus String?
+  toStatus   String?
+
+  /// The operator. A null id with actorRole SYSTEM marks the engine acting on
+  /// its own: gateway callbacks and queue drains.
+  actorId   String?
+  actor     User?   @relation("RefundAuditActor", fields: [actorId], references: [id])
+  actorRole String
+  /// Name snapshot, so the trail stays readable after a rename.
+  actorName String?
+
+  /// Amount in play at this step, in paisa, for reconstructing the movement.
+  amountMinor BigInt?
+  note        String?
+  /// JSON string of extra context: gateway payloads, ticket ids.
+  metadata String?
+  ip       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([refundId, createdAt])
+  @@index([createdAt])
+}
+
+/// Where an organizer's money is sent.
+///
+/// Deliberately holds only the last four digits of the account or wallet
+/// number. The full number is what a payout file needs and what an attacker
+/// wants; until there is a KMS-backed encrypted column and an audited access
+/// path for it, the safe thing is not to have it. `externalRef` is for the id
+/// the payment partner assigns to a verified beneficiary, which is what an
+/// actual disbursement call should use.
+model PayoutMethod {
+  id          String    @id @default(cuid())
+  organizerId String
+  organizer   Organizer @relation(fields: [organizerId], references: [id])
+
+  type  String // BANK_TRANSFER | BKASH | NAGAD
+  label String
+
+  accountName   String
+  accountLast4  String
+  bankName      String?
+  branchName    String?
+  routingNumber String?
+  externalRef   String?
+
+  status    String  @default("UNVERIFIED") // UNVERIFIED | VERIFIED | REJECTED | DISABLED
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payouts Payout[]
+
+  @@index([organizerId, status])
+}
+
+/// What an organizer is owed for a period, and how that number was reached.
+///
+/// Every component is stored rather than recomputed, so a settlement stays
+/// reproducible after fee rates, prices or refunds change:
+/// `netPayableMinor = grossSalesMinor - discountsMinor - refundsMinor
+///                    - platformFeeMinor - gatewayFeeMinor + adjustmentMinor`
+/// (a CHECK constraint). `adjustmentMinor` is the only component that may be
+/// negative — it carries manual corrections, both directions.
+model Settlement {
+  id               String @id @default(cuid())
+  settlementNumber String @unique
+
+  organizerId String
+  organizer   Organizer @relation(fields: [organizerId], references: [id])
+  /// Set for a per-event settlement; null for a whole-period one.
+  eventId String?
+  event   Event?  @relation(fields: [eventId], references: [id])
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  grossSalesMinor  BigInt @default(0)
+  discountsMinor   BigInt @default(0)
+  refundsMinor     BigInt @default(0)
+  platformFeeMinor BigInt @default(0)
+  gatewayFeeMinor  BigInt @default(0)
+  adjustmentMinor  BigInt @default(0)
+  netPayableMinor  BigInt @default(0)
+  currency         String @default("BDT")
+
+  status       String  @default("DRAFT") // DRAFT | OPEN | APPROVED | PAID | CANCELLED
+  approvedById String?
+  notes        String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  approvedAt DateTime?
+
+  payout Payout?
+
+  /// Stops the same event/period being settled twice. Postgres treats NULLs as
+  /// distinct, so this does not constrain whole-period rows where `eventId` is
+  /// null; those are guarded in the settlement builder instead.
+  @@unique([organizerId, eventId, periodStart, periodEnd])
+  @@index([status, periodEnd])
+}
+
+/// A disbursement to an organizer.
+model Payout {
+  id           String @id @default(cuid())
+  payoutNumber String @unique
+
+  organizerId String
+  organizer   Organizer @relation(fields: [organizerId], references: [id])
+
+  /// One payout per settlement. Nullable for an off-cycle manual payout.
+  settlementId String?     @unique
+  settlement   Settlement? @relation(fields: [settlementId], references: [id])
+
+  payoutMethodId String?
+  payoutMethod   PayoutMethod? @relation(fields: [payoutMethodId], references: [id])
+
+  amountMinor BigInt
+  currency    String @default("BDT")
+
+  status        String  @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED
+  reference     String?
+  failureReason String?
+  initiatedById String?
+
+  scheduledFor DateTime?
+  paidAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([organizerId, status])
+  @@index([status, scheduledFor])
+}
+
+/// Append-only double-entry ledger: the system of record for what the platform
+/// holds, owes and has earned.
+///
+/// Every financial event writes one balanced *group* of entries — the debits in
+/// a `groupId` always equal the credits — so any account balance is a `SUM`
+/// over this table, and a discrepancy is a query rather than an investigation.
+/// `amountMinor` is always positive; `direction` carries the sign.
+///
+/// Intentionally has no foreign keys. An entry has to remain readable and
+/// unchanged for as long as the books do, and an FK invites exactly the cascade
+/// that would erase history when an order or event is deleted. The reference
+/// columns are indexed ids, checked by the writer in `src/lib/ledger.ts`.
+model LedgerEntry {
+  id      String @id @default(cuid())
+  /// Groups the entries of one balanced posting.
+  groupId String
+  /// The business event that produced the group.
+  /// PAYMENT_CAPTURED | REFUND_COMPLETED | PAYOUT_PAID | GATEWAY_SETTLED | ADJUSTMENT
+  kind String
+  /// Chart of accounts. See LEDGER_ACCOUNTS in src/lib/ledger.ts.
+  /// GATEWAY_CLEARING | CASH | PLATFORM_REVENUE | ORGANIZER_PAYABLE | GATEWAY_FEES | ADJUSTMENTS
+  account String
+  /// DEBIT | CREDIT
+  direction String
+  /// Always positive, in paisa.
+  amountMinor BigInt
+  currency    String @default("BDT")
+  description String?
+
+  organizerId  String?
+  eventId      String?
+  orderId      String?
+  paymentId    String?
+  refundId     String?
+  payoutId     String?
+  settlementId String?
+
+  /// When the money moved, which is not always when the row was written.
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([groupId])
+  @@index([account, occurredAt])
+  @@index([organizerId, account])
+  @@index([orderId])
+  @@index([kind, occurredAt])
 }

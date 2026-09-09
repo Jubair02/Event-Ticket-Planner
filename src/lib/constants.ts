@@ -42,6 +42,7 @@ export const PAYMENT_STATUS_LABELS: Record<string, string> = {
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
   REFUNDED: 'Refunded',
+  PARTIALLY_REFUNDED: 'Partially Refunded',
 }
 
 export const PAYMENT_METHODS = [
@@ -50,5 +51,6 @@ export const PAYMENT_METHODS = [
   { value: 'CARD', label: 'Card', color: '#0E7A5F', desc: 'Visa / Mastercard / Amex' },
 ] as const
 
-export const PLATFORM_FEE_RATE = 0.03
+// PLATFORM_FEE_RATE moved to @/lib/money, next to the rounding rule that
+// applies it. Two copies of a commission rate is one copy too many.
 export const PLATFORM_NAME = 'TicketBD'

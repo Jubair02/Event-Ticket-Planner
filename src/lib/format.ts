@@ -1,6 +1,28 @@
 import { CATEGORY_LABELS } from '@/lib/constants'
 
-/** 1500 -> "৳1,500" */
+/**
+ * Money formatting lives in `@/lib/money` next to the arithmetic, and is
+ * re-exported here so display code has one import for presentation helpers.
+ *
+ * `formatMinor` is meant to replace `formatBDT`, which takes taka as a float
+ * and rounds on the way out — so a partial refund of ৳1,500.50 prints as
+ * ৳1,501 and the missing 50 paisa are invisible. `formatMinor` takes paisa and
+ * never rounds.
+ */
+export { formatMinor } from '@/lib/money'
+
+/**
+ * 1500 -> "৳1,500". Takes **taka**, not paisa.
+ *
+ * Kept because the minor-unit migration is only half applied: `schema.prisma`
+ * declares `priceMinor`/`totalMinor` in paisa, but the live database and every
+ * API response still carry taka floats (`"price": 1500`). Passing those to
+ * `formatMinor` would render ৳15 — a hundredfold understatement on every price
+ * in the product — so display code that reads today's API must keep using this.
+ *
+ * Retire it per call site as each endpoint starts returning `*Minor` fields,
+ * not before. See docs/money-model.md.
+ */
 export function formatBDT(amount: number): string {
   return `৳${new Intl.NumberFormat('en-IN').format(Math.round(amount))}`
 }

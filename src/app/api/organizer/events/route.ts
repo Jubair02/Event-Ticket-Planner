@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
 import { CATEGORIES } from '@/lib/constants'
 import { safeHttpUrl } from '@/lib/url'
+import { uniqueEventSlug } from '@/lib/slug'
 
 type TicketTypeInput = {
   name?: unknown
@@ -146,10 +147,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: tts.error ?? 'Invalid ticket types' }, { status: 400 })
     }
 
+    // Generated once here and never regenerated on rename, so the public URL
+    // for an event is a stable permalink.
+    const slug = await uniqueEventSlug(db, title)
+
     const event = await db.event.create({
       data: {
         organizerId: organizer.id,
         title,
+        slug,
         description,
         category,
         banner,

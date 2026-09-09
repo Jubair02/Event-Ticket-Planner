@@ -2,7 +2,8 @@
 
 import type { EventListItem } from '@/lib/types'
 import { formatBDT, formatEventDate, categoryLabel, categoryEmoji, daysUntil } from '@/lib/format'
-import { useAppStore } from '@/lib/store'
+import Link from 'next/link'
+import { paths } from '@/lib/routes'
 import { Badge } from '@/components/ui/badge'
 import { CalendarDays, MapPin, Users } from 'lucide-react'
 
@@ -20,7 +21,6 @@ function totalQty(event: EventListItem): number {
 }
 
 export function EventCard({ event }: { event: EventListItem }) {
-  const navigate = useAppStore((s) => s.navigate)
   const min = fromPrice(event)
   const sold = totalSold(event)
   const qty = totalQty(event)
@@ -28,8 +28,9 @@ export function EventCard({ event }: { event: EventListItem }) {
   const dateLabel = daysUntil(event.startDate, event.endDate)
 
   return (
-    <button
-      onClick={() => navigate({ name: 'event-detail', eventId: event.id })}
+    /* A real link now, so the card is crawlable, middle-clickable and prefetched. */
+    <Link
+      href={paths.event(event)}
       className="group flex h-full flex-col overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={`View event ${event.title}`}
     >
@@ -96,6 +97,6 @@ export function EventCard({ event }: { event: EventListItem }) {
           </div>
         </div>
       </div>
-    </button>
+    </Link>
   )
 }

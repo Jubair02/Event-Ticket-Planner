@@ -2,6 +2,7 @@
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
+import { slugify } from '../src/lib/slug'
 
 const db = new PrismaClient()
 
@@ -21,6 +22,20 @@ function nextQrToken(): string {
   return `qr_${crypto.randomBytes(12).toString('hex')}`
 }
 
+/**
+ * Seed passwords are never hardcoded: this script wipes and repopulates
+ * whatever database DATABASE_URL points at, so a fixed `admin123` would hand
+ * anyone who found it a live SUPER_ADMIN account. Set SEED_ADMIN_PASSWORD /
+ * SEED_DEMO_PASSWORD for a stable local login, otherwise a fresh random one is
+ * generated per run and printed once below.
+ */
+function randomPassword(): string {
+  return crypto.randomBytes(12).toString('base64url')
+}
+
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || randomPassword()
+const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD || randomPassword()
+
 async function main() {
   console.log('🌱 Seeding TicketBD database...')
 
@@ -35,6 +50,8 @@ async function main() {
   await db.user.deleteMany()
 
   const pw = (p: string) => bcrypt.hashSync(p, 10)
+  const adminPassword = ADMIN_PASSWORD
+  const demoPassword = DEMO_PASSWORD
 
   // ---- users ----
   const admin = await db.user.create({
@@ -42,7 +59,7 @@ async function main() {
       name: 'Platform Admin',
       email: 'admin@ticketbd.com',
       phone: '+8801700000001',
-      password: pw('admin123'),
+      password: pw(adminPassword),
       role: 'SUPER_ADMIN',
     },
   })
@@ -52,7 +69,7 @@ async function main() {
       name: 'Rafiq Ahmed',
       email: 'organizer@ticketbd.com',
       phone: '+8801700000002',
-      password: pw('organizer123'),
+      password: pw(demoPassword),
       role: 'ORGANIZER',
     },
   })
@@ -71,7 +88,7 @@ async function main() {
       name: 'Nadia Chowdhury',
       email: 'nadia@eventprobd.com',
       phone: '+8801700000007',
-      password: pw('organizer123'),
+      password: pw(demoPassword),
       role: 'ORGANIZER',
     },
   })
@@ -89,7 +106,7 @@ async function main() {
       name: 'Jubair Hossain',
       email: 'customer@ticketbd.com',
       phone: '+8801700000003',
-      password: pw('customer123'),
+      password: pw(demoPassword),
       role: 'CUSTOMER',
     },
   })
@@ -99,7 +116,7 @@ async function main() {
       name: 'Kamal Uddin',
       email: 'staff@ticketbd.com',
       phone: '+8801700000004',
-      password: pw('staff123'),
+      password: pw(demoPassword),
       role: 'EVENT_STAFF',
       createdByOrganizerId: organizer.id,
     },
@@ -117,7 +134,7 @@ async function main() {
   const extraCustomers: { id: string; name: string }[] = []
   for (const c of extraCustomersData) {
     const u = await db.user.create({
-      data: { ...c, password: pw('customer123'), role: 'CUSTOMER' },
+      data: { ...c, password: pw(demoPassword), role: 'CUSTOMER' },
     })
     extraCustomers.push({ id: u.id, name: u.name })
   }
@@ -472,11 +489,41 @@ async function main() {
   await createPaidOrder({ user: extraCustomers[4], event: workshop, typeName: 'Student', quantity: 1, daysAgo: 1 })
   await createPaidOrder({ user: extraCustomers[5], event: foodFest, typeName: 'Family Pack', quantity: 1, daysAgo: 3 })
 
+  // Slugs: filled in one pass at the end so each `event.create` above stays
+  // focused on the event itself. Uses the same slugify the app uses at runtime.
+  const unslugged = await db.event.findMany({
+    where: { slug: null },
+    select: { id: true, title: true },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (unslugged.length > 0) {
+    const taken = new Set(
+      (await db.event.findMany({ where: { slug: { not: null } }, select: { slug: true } }))
+        .map((e) => e.slug)
+        .filter((v): v is string => !!v),
+    )
+    for (const e of unslugged) {
+      const base = slugify(e.title) || `event-${e.id.slice(-6)}`
+      let candidate = base
+      for (let n = 2; taken.has(candidate); n++) candidate = `${base}-${n}`
+      taken.add(candidate)
+      await db.event.update({ where: { id: e.id }, data: { slug: candidate } })
+    }
+    console.log(`   Slugs:    generated ${unslugged.length}`)
+  }
+
   console.log('✅ Seed complete!')
-  console.log('   Admin:    admin@ticketbd.com / admin123')
-  console.log('   Organizer: organizer@ticketbd.com / organizer123')
-  console.log('   Customer: customer@ticketbd.com / customer123')
-  console.log('   Staff:    staff@ticketbd.com / staff123')
+  console.log('')
+  console.log('   Sign-in details for this seed run (not stored anywhere else):')
+  console.log(`   Admin:     admin@ticketbd.com / ${ADMIN_PASSWORD}`)
+  console.log(`   Organizer: organizer@ticketbd.com / ${DEMO_PASSWORD}`)
+  console.log(`   Customer:  customer@ticketbd.com / ${DEMO_PASSWORD}`)
+  console.log(`   Staff:     staff@ticketbd.com / ${DEMO_PASSWORD}`)
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.log('')
+    console.log('   These were generated randomly. Set SEED_ADMIN_PASSWORD and')
+    console.log('   SEED_DEMO_PASSWORD before seeding to choose them yourself.')
+  }
 }
 
 main()

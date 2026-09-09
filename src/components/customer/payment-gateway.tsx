@@ -14,7 +14,8 @@ import {
   Smartphone,
 } from 'lucide-react'
 import { apiGet, apiPost } from '@/lib/api'
-import { useAppStore } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import { paths } from '@/lib/routes'
 import { formatBDT, formatEventDate, formatTime } from '@/lib/format'
 import { PAYMENT_METHODS } from '@/lib/constants'
 import type { OrderDTO } from '@/lib/types'
@@ -31,7 +32,7 @@ type PayMethod = (typeof PAYMENT_METHODS)[number]['value']
 type Phase = 'select' | 'processing' | 'failed'
 
 export function PaymentGateway({ orderId }: { orderId: string }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const router = useRouter()
   const queryClient = useQueryClient()
 
   const [method, setMethod] = useState<PayMethod | null>(null)
@@ -44,12 +45,13 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
   })
   const order = query.data?.order
 
-  // Idempotent guard: already paid → go to the verified success page (navigate is external, no setState)
+  // Idempotent guard: already paid → go to the verified success page
+  // (navigation is external to React state, so this is not setState-in-effect)
   useEffect(() => {
     if (order?.paymentStatus === 'PAID') {
-      navigate({ name: 'payment-success', orderId })
+      router.push(paths.orderSuccess(orderId))
     }
-  }, [order?.paymentStatus, navigate, orderId])
+  }, [order?.paymentStatus, router, orderId])
 
   // Derived failure state (server-reported failure surfaces even on first render)
   const serverFailed = order?.paymentStatus === 'FAILED'
@@ -84,7 +86,7 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
         queryClient.removeQueries({ queryKey: ['order', orderId] })
         queryClient.invalidateQueries({ queryKey: ['orders', 'mine'] })
         toast.success('Payment successful!')
-        navigate({ name: 'payment-success', orderId })
+        router.push(paths.orderSuccess(orderId))
       } else {
         setFailureError(res.error || 'Your payment could not be completed.')
         setPhase('failed')
@@ -106,7 +108,7 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
           title="Order not found"
           description="This order does not exist or you do not have access to it."
           action={
-            <Button onClick={() => navigate({ name: 'my-tickets' })}>
+            <Button onClick={() => router.push(paths.tickets())}>
               <ArrowLeft className="h-4 w-4" /> Back to My Tickets
             </Button>
           }
@@ -191,7 +193,7 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
                   <Button variant="outline" className="flex-1" onClick={() => setPhase('select')}>
                     Try Again
                   </Button>
-                  <Button variant="ghost" className="flex-1" onClick={() => navigate({ name: 'my-tickets' })}>
+                  <Button variant="ghost" className="flex-1" onClick={() => router.push(paths.tickets())}>
                     Back to My Tickets
                   </Button>
                 </div>
@@ -278,7 +280,7 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
         </Card>
 
         <div className="mt-4 text-center">
-          <Button variant="ghost" size="sm" onClick={() => navigate({ name: 'my-tickets' })}>
+          <Button variant="ghost" size="sm" onClick={() => router.push(paths.tickets())}>
             <ArrowLeft className="h-4 w-4" /> Back to My Tickets
           </Button>
         </div>

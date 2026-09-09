@@ -17,8 +17,10 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { apiGet } from '@/lib/api'
+import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
-import type { CheckoutItem, View } from '@/lib/store'
+import { paths } from '@/lib/routes'
+import type { CheckoutItem } from '@/lib/types'
 import {
   categoryEmoji,
   categoryLabel,
@@ -84,7 +86,8 @@ function Fact({
 }
 
 export function EventDetail({ eventId }: { eventId: string }) {
-  const { navigate, openAuth, user } = useAppStore()
+  const { openAuth, user } = useAppStore()
+  const router = useRouter()
   const [selected, setSelected] = useState<Record<string, number>>({})
 
   const query = useQuery({
@@ -129,14 +132,15 @@ export function EventDetail({ eventId }: { eventId: string }) {
   function handleBuy() {
     const items: CheckoutItem[] = picked.map((r) => ({ ticketTypeId: r.t.id, quantity: r.qty }))
     if (items.length === 0) return
-    // Carry the selection through, so checkout shows what was actually chosen.
-    const target: View = { name: 'checkout', eventId, items }
+    // Carry the selection through in the URL, so checkout shows what was
+    // actually chosen — and still shows it after a refresh.
+    const target = paths.checkout(eventId, items)
     if (!user) {
       // Come back here after signing in instead of landing on the homepage.
       openAuth('login', target)
       return
     }
-    navigate(target)
+    router.push(target)
   }
 
   if (query.isError) {
@@ -152,7 +156,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
                 <RefreshCw className={cn('h-4 w-4', query.isFetching && 'animate-spin')} />
                 {query.isFetching ? 'Retrying…' : 'Try again'}
               </Button>
-              <Button variant="outline" onClick={() => navigate({ name: 'home' })}>
+              <Button variant="outline" onClick={() => router.push(paths.events())}>
                 <ArrowLeft className="h-4 w-4" /> Back to events
               </Button>
             </div>
@@ -271,7 +275,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
             variant="secondary"
             size="icon"
             className="h-10 w-10 bg-background/85 backdrop-blur transition-colors hover:bg-background"
-            onClick={() => navigate({ name: 'home' })}
+            onClick={() => router.push(paths.events())}
             aria-label="Back to events"
           >
             <ArrowLeft className="h-4 w-4" />

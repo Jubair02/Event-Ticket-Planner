@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { PaymentStatusBadge, EventStatusBadge } from './organizer-dashboard'
+import { PaymentStatusBadge, EventStatusBadge } from '@/components/dashboard/status-badges'
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()

@@ -6,6 +6,7 @@ const ORDER_INCLUDE = {
   event: {
     select: {
       id: true,
+      slug: true,
       title: true,
       banner: true,
       venue: true,

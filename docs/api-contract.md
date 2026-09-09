@@ -172,8 +172,147 @@ mounted, so dismissing one returns you there. `navigate()` closes both.
 - Loading: skeletons/spinners; never leave a blank screen. Buttons show loading state (disabled + spinner text like "Processing...").
 - Images: plain `<img>` tags (no next/image optimization issues with uploads), `object-cover`, alt text required.
 
-## 6. Demo Accounts (seeded)
-- admin@ticketbd.com / admin123 (SUPER_ADMIN)
-- organizer@ticketbd.com / organizer123 (ORGANIZER, APPROVED — "SoundWave Entertainment")
-- customer@ticketbd.com / customer123 (CUSTOMER — "Jubair Hossain")
-- staff@ticketbd.com / staff123 (EVENT_STAFF — assigned to seeded events)
+## 6. Seeded Accounts
+Passwords are **not** hardcoded and are not documented here. `prisma/seed.ts`
+reads `SEED_ADMIN_PASSWORD` and `SEED_DEMO_PASSWORD`, or generates a random
+password per run and prints it once on completion.
+
+- admin@ticketbd.com (SUPER_ADMIN) — uses `SEED_ADMIN_PASSWORD`
+- organizer@ticketbd.com (ORGANIZER, APPROVED — "SoundWave Entertainment")
+- customer@ticketbd.com (CUSTOMER — "Jubair Hossain")
+- staff@ticketbd.com (EVENT_STAFF — assigned to seeded events)
+
+The three non-admin accounts share `SEED_DEMO_PASSWORD`. The login dialog does
+not offer quick-login buttons: shipping credentials to the browser would give
+every visitor an admin session.
+
+## 7. Refund Engine
+
+Domain rules and arithmetic: `src/lib/refunds.ts` (pure, no db).
+Transactional state machine: `src/lib/refund-service.ts`.
+Gateway adapter: `src/lib/refund-gateway.ts`.
+Tables: `Refund`, `RefundItem`, `RefundAuditLog`, plus `Ticket.refundLockId`,
+`Order.refundedMinor`, `Payment.refundedMinor`.
+
+### 7.1 The rule that shapes the API
+
+**No endpoint accepts an amount.** A refund is a *set of tickets*; the server
+prices them from the stored `TicketType.priceMinor` and the policy table. A
+partial refund is `ticketIds: [...]`, never `amount: 1500`. A body carrying
+`amount` or `amountMinor` is rejected with 400 `REFUND_AMOUNT_NOT_ACCEPTED`
+rather than ignored, so a client written against the wrong assumption fails
+loudly instead of quietly being given a different number.
+
+Customers also cannot choose a reason code — they always file
+`CUSTOMER_REQUEST`. Being able to name `EVENT_CANCELLED` would let them select
+the 100% policy for themselves.
+
+### 7.2 States
+
+`REQUESTED → APPROVED → PROCESSING → COMPLETED`, with `→ REJECTED` from
+REQUESTED/APPROVED/FAILED and `PROCESSING → FAILED`.
+
+`FAILED` is **not** terminal: it retries to `PROCESSING` on the original
+idempotency key (so a refund the gateway actually completed before timing out
+cannot be paid twice), or is abandoned to `REJECTED`, which releases its
+tickets. `COMPLETED` is the stored terminal success state, matching the
+`Refund_status_valid` CHECK constraint and `RefundStatus` in `@/lib/types`.
+
+Every transition is a compare-and-swap (`updateMany({ where: { id, status } })`
+with the row count checked), so a gateway webhook and an operator racing each
+other cannot both apply the same settlement.
+
+### 7.3 Policy
+
+| Situation | Ticket value | Platform fee | Retained |
+|---|---|---|---|
+| Event CANCELLED (any reason code) | 100% | returned | — |
+| Any non-`CUSTOMER_REQUEST` reason | 100% | returned | — |
+| `CUSTOMER_REQUEST`, 7+ days out | 100% | kept | 2% |
+| `CUSTOMER_REQUEST`, 3–7 days | 50% | kept | 2% |
+| `CUSTOMER_REQUEST`, 1–3 days | 25% | kept | 2% |
+| `CUSTOMER_REQUEST`, under 24h | refused (409 `REFUND_WINDOW_CLOSED`) | | |
+
+The event being CANCELLED is checked *first*, so a customer filing a plain
+request against a dead event still gets 100% instead of a voluntary tier. The
+applied rule is stored as `policyCode`, so changing this table cannot rewrite
+what an old refund was owed.
+
+`amountMinor = ticketFaceValueMinor + platformFeeRefundedMinor − processingFeeMinor`,
+funded as `organizerShareMinor + platformShareMinor` (both ≥ 0, a CHECK
+constraint). Totals are split across items with largest-remainder allocation, so
+item rows always sum to the refund exactly — no paisa is lost to rounding, and
+the `REFUND_COMPLETED` ledger group always balances.
+
+### 7.4 Endpoints
+
+Customer:
+- `GET /api/orders/[id]/refund?ticketIds=a,b` → `{ quote }` — server-computed
+  preview. Runs the same `planRefund` the write path runs, so the figure shown
+  is the figure written.
+- `POST /api/orders/[id]/refund` body `{ ticketIds?, note? }` → 201 `{ refund }`.
+  Lands in REQUESTED. Rate limited (5/user, 20/IP per 10 min) because filing one
+  claims tickets.
+- `GET /api/refunds/mine` → `{ refunds }`.
+- `GET /api/refunds/[id]` → `{ refund }`. A SUPER_ADMIN gets the full record; the
+  owner gets status, money and a plain-language timeline; anyone else gets 404
+  (not 403) so ids are not enumerable.
+
+Admin (SUPER_ADMIN):
+- `GET /api/admin/refunds?status=&type=&eventId=&batchId=&q=` →
+  `{ refunds, counts, totals, owed, owedOutstandingMinor }`. `owed` is paid
+  orders on cancelled events with no live refund — money owed that nothing is
+  working on.
+- `POST /api/admin/refunds` body `{ orderId, ticketIds?, reasonCode, note?, hold?, submit? }`
+  → 201 `{ refund, gatewayMessage }`. Approved on creation (the admin issuing it
+  *is* the approval); `hold: true` leaves it REQUESTED for a second pair of eyes.
+  `submit: true` also sends it to the gateway in the same request.
+- `PATCH /api/admin/refunds/[id]` body `{ action: 'approve'|'reject'|'process'|'retry', note?, rejectionReason? }`
+  → `{ refund, outcome?, message? }`. `reject` requires a reason and releases the
+  tickets.
+- `POST /api/admin/refunds/process` body `{ limit?, batchId? }` → `{ summary }`.
+  Drains APPROVED refunds oldest-first, up to `limit` (default 25, max 100).
+  Bounded so a mass cancellation cannot time out mid-payout; call again while
+  `summary.remaining > 0`. One failure does not abort the run.
+- `POST /api/admin/events/[id]/cancel` body `{ note?, limit? }` → `{ summary }`.
+
+Event cancellation:
+- `POST /api/organizer/events/[id]/cancel` and the admin route above cancel the
+  event, void live tickets, and file a full refund for every order still owed
+  money under one `batchId`. Refunds are created APPROVED but **not** paid here —
+  drain them with `/api/admin/refunds/process`. Both are safe to re-run: orders
+  whose tickets a refund already claimed are skipped, which is also how a batch
+  interrupted by `hasMore` is continued.
+
+Gateway callback:
+- `POST /api/payments/refund-webhook` body `{ gatewayRefundId, status: 'SETTLED'|'FAILED', message? }`,
+  header `x-refund-signature: <hex>` = `HMAC-SHA256(REFUND_WEBHOOK_SECRET, rawBody)`.
+  The HMAC is computed over the raw bytes and compared timing-safely; an
+  unsigned call gets 401 and is never parsed. Idempotent — a replay returns
+  `changed: false` and is still recorded in the audit trail.
+
+### 7.5 Concurrency and integrity
+
+- **Ticket claims.** `Ticket.refundLockId` is taken with a conditional
+  `UPDATE ... WHERE "refundLockId" IS NULL` and the affected-row count checked,
+  so two operators cannot refund the same ticket — the technique
+  `/api/payments/execute` uses against overselling. Released only on rejection.
+- **The gateway is never called inside a transaction.** Rolling back after money
+  moved would leave the database claiming the refund never happened.
+- **Settlement is one transaction**: refund → COMPLETED, `Order.refundedMinor`
+  and `Payment.refundedMinor` incremented (then re-read to decide
+  REFUNDED vs PARTIALLY_REFUNDED), tickets → REFUNDED, seats returned to
+  inventory for events that can still sell, and the balanced
+  `REFUND_COMPLETED` ledger group posted. All of it commits together.
+- **Audit trail.** `RefundAuditLog` is append-only and records every state edge
+  and gateway exchange with the operator, their role and IP, the amount in play
+  and a JSON metadata blob. Customers see a filtered, plain-language subset.
+
+### 7.6 Environment
+
+- `REFUND_WEBHOOK_SECRET` — **required in production** (min 32 chars), like
+  `AUTH_SECRET`. Without it, anyone could mark refunds settled. A development
+  fallback is used when `NODE_ENV !== 'production'`.
+- `REFUND_GATEWAY_MODE` — `settle` (default, settles inline), `async` (accepts,
+  then waits for the webhook), `fail` (retryable), `decline` (permanent). Lets
+  the whole state machine be exercised without a live gateway.

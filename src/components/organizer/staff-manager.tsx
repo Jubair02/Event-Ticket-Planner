@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Info, Loader2, Plus, ShieldOff, Trash2, UserCheck, Users } from 'lucide-react'
+import { Loader2, Plus, ShieldCheck, ShieldOff, Trash2, UserCheck, Users } from 'lucide-react'
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api'
 import type { EventListItem } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Table,
   TableBody,
@@ -40,6 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { EmptyState } from '@/components/app/empty-state'
+import { Panel, SectionHeading, entrance } from '@/components/dashboard/primitives'
 
 interface StaffRow {
   id: string
@@ -50,6 +50,9 @@ interface StaffRow {
   createdAt: string
   staffAssignments: Array<{ id: string; event: { id: string; title: string } }>
 }
+
+/** How many assigned-event chips to show inline before collapsing to "+N more". */
+const VISIBLE_ASSIGNMENTS = 2
 
 function StaffEventsCheckboxList({
   events,
@@ -64,7 +67,7 @@ function StaffEventsCheckboxList({
     return <p className="text-sm text-muted-foreground">You have no events yet — create one first.</p>
   }
   return (
-    <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border p-3">
+    <div className="max-h-44 space-y-2 overflow-y-auto rounded-lg border p-3">
       {events.map((e) => (
         <label key={e.id} className="flex cursor-pointer items-center gap-2 text-sm" htmlFor={`assign-${e.id}`}>
           <Checkbox
@@ -107,6 +110,14 @@ export function StaffManager() {
     qc.invalidateQueries({ queryKey: ['organizer-staff'] })
   }
 
+  function resetCreateForm() {
+    setName('')
+    setEmail('')
+    setPhone('')
+    setPassword('')
+    setSelectedEvents([])
+  }
+
   const createMutation = useMutation({
     mutationFn: () =>
       apiPost('/api/organizer/staff', {
@@ -117,13 +128,9 @@ export function StaffManager() {
         eventIds: selectedEvents,
       }),
     onSuccess: () => {
-      toast.success('Staff member created')
+      toast.success('Staff account created')
       setCreateOpen(false)
-      setName('')
-      setEmail('')
-      setPhone('')
-      setPassword('')
-      setSelectedEvents([])
+      resetCreateForm()
       invalidate()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -133,7 +140,7 @@ export function StaffManager() {
     mutationFn: (s: StaffRow) =>
       apiPut(`/api/organizer/staff/${s.id}`, { status: s.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' }),
     onSuccess: (_d, s) => {
-      toast.success(s.status === 'ACTIVE' ? `${s.name} suspended` : `${s.name} activated`)
+      toast.success(s.status === 'ACTIVE' ? `${s.name} suspended` : `${s.name} reactivated`)
       invalidate()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -143,7 +150,7 @@ export function StaffManager() {
     mutationFn: ({ id, eventIds }: { id: string; eventIds: string[] }) =>
       apiPut(`/api/organizer/staff/${id}`, { eventIds }),
     onSuccess: () => {
-      toast.success('Assigned events updated')
+      toast.success('Assignments updated')
       setManageTarget(null)
       invalidate()
     },
@@ -163,178 +170,204 @@ export function StaffManager() {
   const creating = createMutation.isPending
 
   return (
-    <div className="space-y-4">
-      <Alert>
-        <Info className="h-4 w-4" />
-        <AlertDescription>
-          Staff log in with their email + password and can only scan tickets for assigned events.
-        </AlertDescription>
-      </Alert>
-
-      <div className="flex items-center justify-between">
-        <h2 className="font-semibold">Your Staff ({staff.length})</h2>
-        <Button
-          onClick={() => {
-            setName('')
-            setEmail('')
-            setPhone('')
-            setPassword('')
-            setSelectedEvents([])
-            setCreateOpen(true)
-          }}
+    <section aria-labelledby="organizer-staff-heading" className="space-y-4">
+      <div {...entrance(0)}>
+        <SectionHeading
+          id="organizer-staff-heading"
+          title="Gate staff"
+          description={
+            isLoading
+              ? 'Loading staff…'
+              : `${staff.length} account${staff.length === 1 ? '' : 's'} — staff sign in with their email and can only scan tickets for the events you assign.`
+          }
         >
-          <Plus className="mr-2 h-4 w-4" /> Create Staff
-        </Button>
+          <Button
+            className="active:scale-[0.98] motion-reduce:transform-none"
+            onClick={() => {
+              resetCreateForm()
+              setCreateOpen(true)
+            }}
+          >
+            <Plus /> Create staff
+          </Button>
+        </SectionHeading>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-14 w-full rounded-lg" />
-          ))}
-        </div>
-      ) : staff.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          title="No staff yet"
-          description="Create staff accounts so your team can scan tickets at the gate."
-          action={
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Create Staff
-            </Button>
-          }
-        />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <Table className="min-w-[760px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Assigned Events</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {staff.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-sm">{s.email}</TableCell>
-                  <TableCell className="text-sm">{s.phone || '—'}</TableCell>
-                  <TableCell>
-                    <div className="flex max-w-[260px] flex-wrap gap-1">
-                      {s.staffAssignments.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">No events</span>
-                      ) : (
-                        s.staffAssignments.map((a) => (
-                          <Badge key={a.id} variant="outline" className="max-w-[240px] truncate">
-                            {a.event.title}
-                          </Badge>
-                        ))
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {s.status === 'ACTIVE' ? (
-                      <Badge variant="default">Active</Badge>
-                    ) : (
-                      <Badge variant="destructive">Suspended</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8"
-                        onClick={() => {
-                          setManageSelected(s.staffAssignments.map((a) => a.event.id))
-                          setManageTarget(s)
-                        }}
-                        aria-label={`Manage events for ${s.name}`}
-                      >
-                        <UserCheck className="mr-1.5 h-3.5 w-3.5" /> Events
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        title={s.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
-                        aria-label={s.status === 'ACTIVE' ? `Suspend ${s.name}` : `Activate ${s.name}`}
-                        disabled={toggleMutation.isPending}
-                        onClick={() => toggleMutation.mutate(s)}
-                      >
-                        {toggleMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <ShieldOff className={`h-4 w-4 ${s.status === 'ACTIVE' ? 'text-amber-600' : 'text-primary'}`} />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        aria-label={`Delete ${s.name}`}
-                        onClick={() => setDeleteTarget(s)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <div {...entrance(1)}>
+        {isLoading ? (
+          <Panel padded={false} className="divide-y divide-border/70">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-4 p-4">
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-56" />
+                </div>
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+            ))}
+          </Panel>
+        ) : staff.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="No staff yet"
+            description="Create staff accounts so your team can scan tickets at the gate. Each account only sees the events you assign."
+            action={
+              <Button
+                onClick={() => {
+                  resetCreateForm()
+                  setCreateOpen(true)
+                }}
+              >
+                <Plus /> Create staff
+              </Button>
+            }
+          />
+        ) : (
+          <Panel padded={false} className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[760px]">
+                <caption className="sr-only">Your gate staff with contact details, assigned events, status and actions</caption>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Staff</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Assigned events</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {staff.map((s) => {
+                    const extra = s.staffAssignments.length - VISIBLE_ASSIGNMENTS
+                    const rowBusy = toggleMutation.isPending && toggleMutation.variables?.id === s.id
+                    return (
+                      <TableRow key={s.id} className="transition-colors">
+                        <TableCell>
+                          <p className="font-medium">{s.name}</p>
+                          <p className="text-xs text-muted-foreground">{s.email}</p>
+                        </TableCell>
+                        <TableCell className="text-sm tabular-nums">{s.phone || '—'}</TableCell>
+                        <TableCell>
+                          {s.staffAssignments.length === 0 ? (
+                            <span className="text-xs text-muted-foreground">No events</span>
+                          ) : (
+                            <div className="flex max-w-[280px] flex-wrap items-center gap-1">
+                              {s.staffAssignments.slice(0, VISIBLE_ASSIGNMENTS).map((a) => (
+                                <Badge key={a.id} variant="outline" className="max-w-[160px] truncate font-normal">
+                                  {a.event.title}
+                                </Badge>
+                              ))}
+                              {extra > 0 && (
+                                <span className="text-xs text-muted-foreground tabular-nums">+{extra} more</span>
+                              )}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {s.status === 'ACTIVE' ? (
+                            <Badge>Active</Badge>
+                          ) : (
+                            <Badge variant="destructive">Suspended</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => {
+                                setManageSelected(s.staffAssignments.map((a) => a.event.id))
+                                setManageTarget(s)
+                              }}
+                              aria-label={`Assign events for ${s.name}`}
+                            >
+                              <UserCheck /> Events
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title={s.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}
+                              aria-label={s.status === 'ACTIVE' ? `Suspend ${s.name}` : `Reactivate ${s.name}`}
+                              disabled={rowBusy}
+                              onClick={() => toggleMutation.mutate(s)}
+                            >
+                              {rowBusy ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : s.status === 'ACTIVE' ? (
+                                <ShieldOff className="h-4 w-4 text-chart-5" />
+                              ) : (
+                                <ShieldCheck className="h-4 w-4 text-primary" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              aria-label={`Remove ${s.name}`}
+                              onClick={() => setDeleteTarget(s)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </Panel>
+        )}
+      </div>
 
       {/* Create staff dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create Staff Account</DialogTitle>
-            <DialogDescription>
-              The staff member logs in with this email and password to scan tickets.
-            </DialogDescription>
+            <DialogTitle>Create staff account</DialogTitle>
+            <DialogDescription>They sign in with this email and password to scan tickets.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="st-name">Name *</Label>
-              <Input id="st-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
+              <Label htmlFor="st-name">Name</Label>
+              <Input id="st-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" autoComplete="off" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="st-email">Email *</Label>
+              <Label htmlFor="st-email">Email</Label>
               <Input
                 id="st-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="staff@example.com"
+                autoComplete="off"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="st-phone">Phone</Label>
+              <Label htmlFor="st-phone">Phone (optional)</Label>
               <Input
                 id="st-phone"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+8801XXXXXXXXX"
+                autoComplete="off"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="st-pass">Password *</Label>
+              <Label htmlFor="st-pass">Password</Label>
               <Input
                 id="st-pass"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Minimum 6 characters"
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
               />
             </div>
             <div className="grid gap-2">
-              <Label>Assign Events</Label>
+              <Label>Assign events</Label>
               <StaffEventsCheckboxList
                 events={events}
                 selected={selectedEvents}
@@ -352,24 +385,24 @@ export function StaffManager() {
               disabled={creating}
               onClick={() => {
                 if (!name.trim() || !email.trim() || password.length < 6) {
-                  toast.error('Name, email and a 6+ character password are required')
+                  toast.error('Name, email and a password of at least 6 characters are required')
                   return
                 }
                 createMutation.mutate()
               }}
             >
-              {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create Staff
+              {creating && <Loader2 className="animate-spin" />}
+              Create staff
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Manage events dialog */}
-      <Dialog open={!!manageTarget} onOpenChange={(o) => { if (!o) setManageTarget(null) }}>
+      {/* Assign events dialog */}
+      <Dialog open={!!manageTarget} onOpenChange={(o) => !o && setManageTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Assign Events — {manageTarget?.name}</DialogTitle>
+            <DialogTitle>Assign events — {manageTarget?.name}</DialogTitle>
             <DialogDescription>Tick the events this staff member can scan tickets for.</DialogDescription>
           </DialogHeader>
           <StaffEventsCheckboxList
@@ -390,24 +423,24 @@ export function StaffManager() {
                 assignMutation.mutate({ id: manageTarget.id, eventIds: manageSelected })
               }}
             >
-              {assignMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Assignments
+              {assignMutation.isPending && <Loader2 className="animate-spin" />}
+              Save assignments
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+      {/* Remove confirm */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove staff member?</AlertDialogTitle>
+            <AlertDialogTitle>Remove this staff member?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget?.name} will lose access immediately and their event assignments will be removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep Staff</AlertDialogCancel>
+            <AlertDialogCancel>Keep staff</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={(ev) => {
@@ -415,12 +448,12 @@ export function StaffManager() {
                 if (deleteTarget) deleteMutation.mutate(deleteTarget.id)
               }}
             >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleteMutation.isPending && <Loader2 className="animate-spin" />}
               Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </section>
   )
 }

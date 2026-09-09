@@ -199,3 +199,20 @@ export function safeUser(user: {
       : undefined,
   }
 }
+
+/**
+ * Resolves the signed-in organizer's profile.
+ *
+ * Requires the ORGANIZER role *and* an APPROVED application: an organizer who
+ * has not been approved yet has no events and no earnings, and must not reach
+ * settlement endpoints.
+ */
+export async function requireOrganizer() {
+  const user = await requireRole('ORGANIZER')
+  const organizer = await db.organizer.findUnique({ where: { userId: user.id } })
+  if (!organizer) throw new AuthError('Organizer profile not found', 404)
+  if (organizer.status !== 'APPROVED') {
+    throw new AuthError('Your organizer account is still awaiting approval', 403)
+  }
+  return { user, organizer }
+}

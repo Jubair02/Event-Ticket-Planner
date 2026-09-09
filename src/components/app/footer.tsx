@@ -1,11 +1,12 @@
 'use client'
 
 import { Ticket, MapPin, ShieldCheck, Mail } from 'lucide-react'
+import Link from 'next/link'
 import { useAppStore } from '@/lib/store'
+import { paths } from '@/lib/routes'
 import { Button } from '@/components/ui/button'
 
 export function Footer() {
-  const navigate = useAppStore((s) => s.navigate)
   const openAuth = useAppStore((s) => s.openAuth)
 
   return (
@@ -38,14 +39,14 @@ export function Footer() {
             <h3 className="text-sm font-semibold">Explore</h3>
             <ul className="mt-3 space-y-2 text-sm opacity-70">
               <li>
-                <button className="hover:opacity-100 hover:underline" onClick={() => navigate({ name: 'home' })}>
+                <Link className="hover:opacity-100 hover:underline" href={paths.events()}>
                   Browse Events
-                </button>
+                </Link>
               </li>
               <li>
-                <button className="hover:underline" onClick={() => navigate({ name: 'home' })}>
+                <Link className="hover:underline" href={paths.home()}>
                   Popular Events
-                </button>
+                </Link>
               </li>
               <li>
                 <button className="hover:underline" onClick={() => openAuth('register')}>
@@ -75,7 +76,7 @@ export function Footer() {
         </div>
 
         <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-background/15 pt-6 text-xs opacity-60 sm:flex-row">
-          <span>© {new Date().getFullYear()} TicketBD — MVP demo. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} TicketBD. All rights reserved.</span>
           <span>Made for Bangladesh 🇧🇩 · Dhaka · Chattogram · Sylhet · Khulna · Rajshahi · Cox&apos;s Bazar</span>
         </div>
       </div>

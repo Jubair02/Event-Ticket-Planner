@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
+import { paths } from '@/lib/routes'
 import { apiGet } from '@/lib/api'
 import type { EventListItem } from '@/lib/types'
 import { CATEGORIES, CATEGORY_LABELS, CITIES } from '@/lib/constants'
@@ -38,8 +40,9 @@ function EventsSkeleton({ count = 8 }: { count?: number }) {
   )
 }
 
-export function HomePage() {
-  const { user, navigate, openAuth } = useAppStore()
+export function HomePage({ browseOnly = false }: { browseOnly?: boolean } = {}) {
+  const { user, openAuth } = useAppStore()
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<string | null>(null)
   const [city, setCity] = useState<string | null>(null)
@@ -75,7 +78,8 @@ export function HomePage() {
 
   return (
     <div className="flex flex-col">
-      {/* HERO */}
+      {/* HERO — the marketing framing belongs on "/", not on the event index */}
+      {!browseOnly && (
       <section className="hero-pattern relative overflow-hidden bg-foreground text-background dark:bg-card">
         <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-primary/25 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-chart-5/20 blur-3xl" />
@@ -116,8 +120,17 @@ export function HomePage() {
           </div>
         </div>
       </section>
+      )}
 
       <div className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6">
+        {browseOnly && (
+          <header className="pt-8">
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Browse events</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Every event on TicketBD — filter by city and category.
+            </p>
+          </header>
+        )}
         {/* SEARCH + FILTERS */}
         <section id="explore" className="scroll-mt-20 py-8" aria-label="Search and filters">
           <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm sm:flex-row sm:items-center">
@@ -213,7 +226,7 @@ export function HomePage() {
         </section>
 
         {/* FEATURED */}
-        {!hasFilters && (
+        {!browseOnly && !hasFilters && (
           <section className="pb-10" aria-label="Featured events">
             <div className="mb-4 flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
@@ -232,7 +245,7 @@ export function HomePage() {
         )}
 
         {/* POPULAR */}
-        {!hasFilters && popular.length > 0 && (
+        {!browseOnly && !hasFilters && popular.length > 0 && (
           <section className="pb-10" aria-label="Popular events">
             <div className="mb-4 flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
@@ -251,7 +264,7 @@ export function HomePage() {
         )}
 
         {/* HOW IT WORKS */}
-        {!hasFilters && (
+        {!browseOnly && !hasFilters && (
           <section className="pb-12" aria-label="How it works">
             <h2 className="mb-6 text-xl font-bold tracking-tight sm:text-2xl">How TicketBD Works</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -274,7 +287,7 @@ export function HomePage() {
         )}
 
         {/* ORGANIZER CTA */}
-        {!hasFilters && (
+        {!browseOnly && !hasFilters && (
           <section className="pb-14" aria-label="Organizer call to action">
             <div className="hero-pattern relative overflow-hidden rounded-2xl bg-primary px-6 py-10 text-primary-foreground sm:px-10 sm:py-12">
               <div className="relative flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
@@ -289,7 +302,7 @@ export function HomePage() {
                   size="lg"
                   variant="secondary"
                   className="shrink-0"
-                  onClick={() => (user ? navigate({ name: 'organizer', tab: 'overview' }) : openAuth('register'))}
+                  onClick={() => (user ? router.push(paths.organizer()) : openAuth('register'))}
                 >
                   <Ticket className="h-5 w-5" /> Start Selling Tickets
                 </Button>

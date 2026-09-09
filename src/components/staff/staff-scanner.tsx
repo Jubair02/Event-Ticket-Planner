@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -18,6 +19,7 @@ import type { Html5Qrcode } from 'html5-qrcode'
 import { ApiError, apiGet, apiPost } from '@/lib/api'
 import { formatBDT, formatDateTimeTime, formatEventDate, formatTime } from '@/lib/format'
 import { useAppStore } from '@/lib/store'
+import { paths } from '@/lib/routes'
 import type { CheckInRow, StaffAssignmentRow, ValidateResult } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -28,12 +30,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmptyState } from '@/components/app/empty-state'
 
-export function StaffScanner() {
-  const navigate = useAppStore((s) => s.navigate)
-  const user = useAppStore((s) => s.user)
+export function StaffScanner({ eventId }: { eventId: string }) {
   const qc = useQueryClient()
 
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  // The event under the scanner is URL state (`?event=`), not component
+  // state: a refresh at the gate reopens the same event.
+  const selectedEventId = eventId
   const [scanTab, setScanTab] = useState<'camera' | 'manual'>('manual')
   const [scanActive, setScanActive] = useState(true)
   const [cameraStarting, setCameraStarting] = useState(false)
@@ -156,112 +158,41 @@ export function StaffScanner() {
      
   }, [scanTab, scanActive])
 
-  // ========================= Step 1: event selection =========================
+  // An unknown or unassigned event id gets an honest state rather than a
+  // scanner pointed at nothing.
   if (!selected) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-        <header className="mb-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <ScanLine className="h-6 w-6" />
-            </span>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Check-in Scanner</h1>
-              <p className="text-sm text-muted-foreground">
-                Welcome{user?.name ? `, ${user.name}` : ''} — select one of your assigned events to start scanning.
-              </p>
-            </div>
-          </div>
-        </header>
-
         {isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-60 rounded-xl" />
-            ))}
-          </div>
-        ) : assignments.length === 0 ? (
+          <Skeleton className="h-60 rounded-xl" />
+        ) : (
           <EmptyState
             icon={ClipboardCheck}
-            title="No event assignments"
-            description="You are not assigned to any events yet — contact your organizer to get access."
+            title="Event not available"
+            description="You are not assigned to this event, or it no longer exists."
             action={
-              <Button variant="outline" onClick={() => navigate({ name: 'home' })}>
-                <ArrowLeft className="mr-2 h-4 w-4" /> Go Home
+              <Button asChild variant="outline">
+                <Link href={paths.staff()}>
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Choose an event
+                </Link>
               </Button>
             }
           />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {assignments.map((a) => {
-              const pct = a.totalTickets > 0 ? Math.round((a.checkedInCount / a.totalTickets) * 100) : 0
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedEventId(a.event.id)
-                    setScanTab('manual')
-                    setScanActive(true)
-                    setLastCode(null)
-                    setCheckedInInfo(null)
-                  }}
-                  className="group overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label={`Scan tickets for ${a.event.title}`}
-                >
-                  <div className="relative aspect-[16/9] w-full overflow-hidden bg-muted">
-                    {a.event.banner ? (
-                       
-                      <img
-                        src={a.event.banner}
-                        alt={`${a.event.title} banner`}
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-primary/10 text-4xl">🎟️</div>
-                    )}
-                    <div className="absolute right-2 top-2">
-                      <Badge className="bg-background/90 text-foreground backdrop-blur hover:bg-background/90">
-                        {a.event.status === 'ONGOING' ? '● Ongoing' : a.event.status}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="space-y-2 p-4">
-                    <h3 className="font-semibold leading-snug group-hover:text-primary">{a.event.title}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {a.event.venue}, {a.event.city}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatEventDate(a.event.startDate)} · {formatTime(a.event.startTime)}
-                    </p>
-                    <div className="pt-1">
-                      <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                        <span>Checked in</span>
-                        <span>
-                          {a.checkedInCount}/{a.totalTickets}
-                        </span>
-                      </div>
-                      <Progress value={pct} />
-                    </div>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
         )}
       </div>
     )
   }
 
-  // ========================= Step 2: scanner panel =========================
   const v = validateMutation.data
   const pct = selected.totalTickets > 0 ? Math.round((selected.checkedInCount / selected.totalTickets) * 100) : 0
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <header className="mb-6">
-        <Button variant="ghost" size="sm" className="mb-2 -ml-2" onClick={() => setSelectedEventId(null)}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Change Event
+        <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
+          <Link href={paths.staff()}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> Change Event
+          </Link>
         </Button>
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -562,6 +493,113 @@ function Row({ label, value, strong, mono }: { label: string; value: string; str
       <span className={`text-right break-all ${strong ? 'text-base font-semibold' : 'font-medium'} ${mono ? 'font-mono' : ''}`}>
         {value}
       </span>
+    </div>
+  )
+}
+
+
+/**
+ * `/staff` — the event picker.
+ *
+ * This was step one of a two-step component whose choice lived in `useState`,
+ * so a refresh dropped the staffer back to the list mid-shift. The choice is a
+ * route now: each card links to `/staff/check-in?event=<id>`.
+ */
+export function StaffEventPicker() {
+  const user = useAppStore((s) => s.user)
+
+  const { data: assignmentsData, isLoading } = useQuery({
+    queryKey: ['staff-assignments'],
+    queryFn: () => apiGet<{ assignments: StaffAssignmentRow[] }>('/api/staff/assignments'),
+  })
+  const assignments = assignmentsData?.assignments ?? []
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      <header className="mb-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <ScanLine className="h-6 w-6" />
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Check-in Scanner</h1>
+            <p className="text-sm text-muted-foreground">
+              Welcome{user?.name ? `, ${user.name}` : ''} — select one of your assigned events to start scanning.
+            </p>
+          </div>
+        </div>
+      </header>
+
+      {isLoading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-60 rounded-xl" />
+          ))}
+        </div>
+      ) : assignments.length === 0 ? (
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No event assignments"
+          description="You are not assigned to any events yet — contact your organizer to get access."
+          action={
+            <Button asChild variant="outline">
+              <Link href={paths.home()}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Go Home
+              </Link>
+            </Button>
+          }
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {assignments.map((a) => {
+            const pct = a.totalTickets > 0 ? Math.round((a.checkedInCount / a.totalTickets) * 100) : 0
+            return (
+              <Link
+                key={a.id}
+                href={paths.staffCheckIn(a.event.id)}
+                className="group overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Scan tickets for ${a.event.title}`}
+              >
+                <div className="relative aspect-[16/9] w-full overflow-hidden bg-muted">
+                  {a.event.banner ? (
+                     
+                    <img
+                      src={a.event.banner}
+                      alt={`${a.event.title} banner`}
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-primary/10 text-4xl">🎟️</div>
+                  )}
+                  <div className="absolute right-2 top-2">
+                    <Badge className="bg-background/90 text-foreground backdrop-blur hover:bg-background/90">
+                      {a.event.status === 'ONGOING' ? '● Ongoing' : a.event.status}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="space-y-2 p-4">
+                  <h3 className="font-semibold leading-snug group-hover:text-primary">{a.event.title}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {a.event.venue}, {a.event.city}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatEventDate(a.event.startDate)} · {formatTime(a.event.startTime)}
+                  </p>
+                  <div className="pt-1">
+                    <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Checked in</span>
+                      <span>
+                        {a.checkedInCount}/{a.totalTickets}
+                      </span>
+                    </div>
+                    <Progress value={pct} />
+                  </div>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

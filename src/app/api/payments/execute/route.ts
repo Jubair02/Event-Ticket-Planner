@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { AuthError, generateQrToken, generateTicketCode, generateTransactionId, requireAuth } from '@/lib/auth'
+import { recordSale } from '@/lib/settlement'
 
 const VALID_METHODS = ['bKash', 'Nagad', 'CARD']
 
@@ -67,7 +68,11 @@ export async function POST(req: NextRequest) {
 
     const order = await db.order.findUnique({
       where: { id: orderId },
-      include: { payments: { orderBy: { createdAt: 'desc' }, take: 1 }, user: { select: { id: true, name: true } } },
+      include: {
+        payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        user: { select: { id: true, name: true } },
+        event: { select: { organizerId: true, title: true, endDate: true } },
+      },
     })
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     if (order.userId !== user.id && user.role !== 'SUPER_ADMIN') {
@@ -149,6 +154,16 @@ export async function POST(req: NextRequest) {
         await tx.order.update({
           where: { id: order.id },
           data: { paymentStatus: 'PAID', status: 'CONFIRMED' },
+        })
+
+        // Credit the organizer in the same transaction that confirms the order,
+        // so a paid order can never exist without its ledger entries.
+        await recordSale(tx, {
+          id: order.id,
+          eventId: order.eventId,
+          subtotal: order.subtotal,
+          totalAmount: order.totalAmount,
+          event: order.event,
         })
       })
       fulfilled = true

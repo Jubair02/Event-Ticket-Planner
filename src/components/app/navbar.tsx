@@ -1,6 +1,9 @@
 'use client'
 
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
+import { paths } from '@/lib/routes'
 import { apiPost } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -24,17 +27,34 @@ const ROLE_LABELS: Record<string, string> = {
   EVENT_STAFF: 'Event Staff',
 }
 
-export function Navbar() {
-  const { user, view, navigate, openAuth, setUser, setProfileOpen } = useAppStore()
-  const { theme, setTheme } = useTheme()
+/**
+ * Which nav entry the current URL belongs to.
+ *
+ * This used to read `view.name` out of the store. The URL is the source of
+ * truth now, so the highlight is correct on a refresh and on Back — neither of
+ * which went through the old `navigate()`.
+ */
+function useActiveSection(): 'browse' | 'tickets' | 'organizer' | 'admin' | 'staff' | null {
+  const pathname = usePathname()
+  if (pathname === '/' || pathname.startsWith('/events')) return 'browse'
+  if (pathname.startsWith('/tickets')) return 'tickets'
+  if (pathname.startsWith('/organizer')) return 'organizer'
+  if (pathname.startsWith('/admin')) return 'admin'
+  if (pathname.startsWith('/staff')) return 'staff'
+  return null
+}
 
-  const active = view.name
+export function Navbar() {
+  const { user, openAuth, setUser, setProfileOpen } = useAppStore()
+  const { theme, setTheme } = useTheme()
+  const router = useRouter()
+  const active = useActiveSection()
 
   async function handleLogout() {
     try {
       await apiPost('/api/auth/logout')
       setUser(null)
-      navigate({ name: 'home' })
+      router.push(paths.home())
       toast.success('Logged out. See you soon!')
     } catch {
       toast.error('Failed to log out')
@@ -45,8 +65,8 @@ export function Navbar() {
     <header className="sticky top-0 z-40 w-full border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
         {/* Logo */}
-        <button
-          onClick={() => navigate({ name: 'home' })}
+        <Link
+          href={paths.home()}
           className="flex items-center gap-2 transition-opacity hover:opacity-80"
           aria-label="TicketBD home"
         >
@@ -56,51 +76,41 @@ export function Navbar() {
           <span className="text-lg font-bold tracking-tight">
             Ticket<span className="text-primary">BD</span>
           </span>
-        </button>
+        </Link>
 
         {/* Desktop nav */}
         <nav className="hidden items-center gap-1 md:flex" aria-label="Main navigation">
-          <Button
-            variant={active === 'home' ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => navigate({ name: 'home' })}
-          >
-            <CalendarDays className="h-4 w-4" /> Browse Events
+          <Button asChild variant={active === 'browse' ? 'secondary' : 'ghost'} size="sm">
+            <Link href={paths.events()} aria-current={active === 'browse' ? 'page' : undefined}>
+              <CalendarDays className="h-4 w-4" /> Browse Events
+            </Link>
           </Button>
           {user?.role === 'CUSTOMER' && (
-            <Button
-              variant={active === 'my-tickets' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => navigate({ name: 'my-tickets' })}
-            >
-              <Ticket className="h-4 w-4" /> My Tickets
+            <Button asChild variant={active === 'tickets' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.tickets()} aria-current={active === 'tickets' ? 'page' : undefined}>
+                <Ticket className="h-4 w-4" /> My Tickets
+              </Link>
             </Button>
           )}
           {user?.role === 'ORGANIZER' && (
-            <Button
-              variant={active === 'organizer' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => navigate({ name: 'organizer', tab: 'overview' })}
-            >
-              <LayoutDashboard className="h-4 w-4" /> Dashboard
+            <Button asChild variant={active === 'organizer' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.organizer()} aria-current={active === 'organizer' ? 'page' : undefined}>
+                <LayoutDashboard className="h-4 w-4" /> Dashboard
+              </Link>
             </Button>
           )}
           {user?.role === 'SUPER_ADMIN' && (
-            <Button
-              variant={active === 'admin' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => navigate({ name: 'admin', tab: 'overview' })}
-            >
-              <ShieldCheck className="h-4 w-4" /> Admin
+            <Button asChild variant={active === 'admin' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.admin()} aria-current={active === 'admin' ? 'page' : undefined}>
+                <ShieldCheck className="h-4 w-4" /> Admin
+              </Link>
             </Button>
           )}
           {user?.role === 'EVENT_STAFF' && (
-            <Button
-              variant={active === 'staff' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => navigate({ name: 'staff' })}
-            >
-              <ScanLine className="h-4 w-4" /> Scanner
+            <Button asChild variant={active === 'staff' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.staff()} aria-current={active === 'staff' ? 'page' : undefined}>
+                <ScanLine className="h-4 w-4" /> Scanner
+              </Link>
             </Button>
           )}
         </nav>
@@ -152,23 +162,24 @@ export function Navbar() {
                   <UserCircle className="h-4 w-4" /> Profile
                 </DropdownMenuItem>
                 {user.role === 'CUSTOMER' && (
-                  <DropdownMenuItem onClick={() => navigate({ name: 'my-tickets' })}>
-                    <Ticket className="h-4 w-4" /> My Tickets
+                  <DropdownMenuItem asChild>
+                    <Link href={paths.tickets()}>
+                      <Ticket className="h-4 w-4" /> My Tickets
+                    </Link>
                   </DropdownMenuItem>
                 )}
                 {user.role === 'ORGANIZER' && (
-                  <DropdownMenuItem onClick={() => navigate({ name: 'organizer', tab: 'overview' })}>
-                    <LayoutDashboard className="h-4 w-4" /> Organizer Dashboard
-                  </DropdownMenuItem>
-                )}
-                {user.role === 'SUPER_ADMIN' && (
-                  <DropdownMenuItem onClick={() => navigate({ name: 'admin', tab: 'overview' })}>
-                    <ShieldCheck className="h-4 w-4" /> Admin Dashboard
+                  <DropdownMenuItem asChild>
+                    <Link href={paths.organizer()}>
+                      <LayoutDashboard className="h-4 w-4" /> Organizer Dashboard
+                    </Link>
                   </DropdownMenuItem>
                 )}
                 {user.role === 'EVENT_STAFF' && (
-                  <DropdownMenuItem onClick={() => navigate({ name: 'staff' })}>
-                    <ScanLine className="h-4 w-4" /> QR Scanner
+                  <DropdownMenuItem asChild>
+                    <Link href={paths.staff()}>
+                      <ScanLine className="h-4 w-4" /> QR Scanner
+                    </Link>
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />
@@ -184,27 +195,27 @@ export function Navbar() {
       {/* Mobile nav */}
       {user && (
         <nav className="flex gap-1 overflow-x-auto border-t px-4 py-2 md:hidden" aria-label="Mobile navigation">
-          <Button variant={active === 'home' ? 'secondary' : 'ghost'} size="sm" onClick={() => navigate({ name: 'home' })}>
-            Events
+          <Button asChild variant={active === 'browse' ? 'secondary' : 'ghost'} size="sm">
+            <Link href={paths.events()}>Events</Link>
           </Button>
           {user.role === 'CUSTOMER' && (
-            <Button variant={active === 'my-tickets' ? 'secondary' : 'ghost'} size="sm" onClick={() => navigate({ name: 'my-tickets' })}>
-              My Tickets
+            <Button asChild variant={active === 'tickets' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.tickets()}>My Tickets</Link>
             </Button>
           )}
           {user.role === 'ORGANIZER' && (
-            <Button variant={active === 'organizer' ? 'secondary' : 'ghost'} size="sm" onClick={() => navigate({ name: 'organizer', tab: 'overview' })}>
-              Dashboard
+            <Button asChild variant={active === 'organizer' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.organizer()}>Dashboard</Link>
             </Button>
           )}
           {user.role === 'SUPER_ADMIN' && (
-            <Button variant={active === 'admin' ? 'secondary' : 'ghost'} size="sm" onClick={() => navigate({ name: 'admin', tab: 'overview' })}>
-              Admin
+            <Button asChild variant={active === 'admin' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.admin()}>Admin</Link>
             </Button>
           )}
           {user.role === 'EVENT_STAFF' && (
-            <Button variant={active === 'staff' ? 'secondary' : 'ghost'} size="sm" onClick={() => navigate({ name: 'staff' })}>
-              Scanner
+            <Button asChild variant={active === 'staff' ? 'secondary' : 'ghost'} size="sm">
+              <Link href={paths.staff()}>Scanner</Link>
             </Button>
           )}
         </nav>

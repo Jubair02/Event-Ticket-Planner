@@ -11,7 +11,8 @@ import {
   QrCode,
 } from 'lucide-react'
 import { apiGet } from '@/lib/api'
-import { useAppStore } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import { paths } from '@/lib/routes'
 import { categoryEmoji, formatBDT, formatEventDate, formatTime } from '@/lib/format'
 import type { OrderDTO } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -21,7 +22,7 @@ import { EmptyState } from '@/components/app/empty-state'
 import { TicketStatusBadge } from '@/components/customer/ticket-status-badge'
 
 export function PaymentSuccess({ orderId }: { orderId: string }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const router = useRouter()
 
   // Server-side verification is the ONLY source of truth — never the URL.
   const query = useQuery({
@@ -46,7 +47,7 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
           title="Order not found"
           description="We could not verify this order. It may not exist or belong to another account."
           action={
-            <Button onClick={() => navigate({ name: 'home' })}>
+            <Button onClick={() => router.push(paths.events())}>
               <ArrowLeft className="h-4 w-4" /> Back to Events
             </Button>
           }
@@ -81,8 +82,8 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
             issued.
           </p>
           <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
-            <Button onClick={() => navigate({ name: 'payment', orderId })}>Try Payment Again</Button>
-            <Button variant="outline" onClick={() => navigate({ name: 'home' })}>
+            <Button onClick={() => router.push(paths.order(orderId))}>Try Payment Again</Button>
+            <Button variant="outline" onClick={() => router.push(paths.events())}>
               Back to Events
             </Button>
           </div>
@@ -150,7 +151,7 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
               </div>
               <div className="min-w-0">
                 <button
-                  onClick={() => navigate({ name: 'event-detail', eventId: order.event!.id })}
+                  onClick={() => router.push(paths.event(order.event!))}
                   className="line-clamp-1 text-left font-semibold hover:text-primary"
                 >
                   {order.event.title}
@@ -191,7 +192,7 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => navigate({ name: 'ticket-detail', ticketId: ticket.id })}
+                        onClick={() => router.push(paths.ticket(ticket.id))}
                       >
                         <QrCode className="h-4 w-4" /> View QR Ticket
                       </Button>
@@ -205,10 +206,10 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
 
         {/* Actions */}
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button className="flex-1" onClick={() => navigate({ name: 'my-tickets' })}>
+          <Button className="flex-1" onClick={() => router.push(paths.tickets())}>
             Go to My Tickets
           </Button>
-          <Button variant="outline" className="flex-1" onClick={() => navigate({ name: 'home' })}>
+          <Button variant="outline" className="flex-1" onClick={() => router.push(paths.events())}>
             Back to Events
           </Button>
         </div>

@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Ban, CalendarDays, History, MapPin, QrCode, Ticket } from 'lucide-react'
 import { apiGet } from '@/lib/api'
-import { useAppStore } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import { paths } from '@/lib/routes'
 import { categoryEmoji, formatEventDate, formatTime } from '@/lib/format'
 import type { OrderDTO, TicketDTO } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -29,7 +30,7 @@ function isCancelledRow(r: TicketRow): boolean {
 }
 
 function TicketRowCard({ row }: { row: TicketRow }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const router = useRouter()
   const { ticket, event } = row
 
   return (
@@ -47,7 +48,7 @@ function TicketRowCard({ row }: { row: TicketRow }) {
         </div>
         <div className="min-w-0 flex-1">
           <button
-            onClick={() => navigate({ name: 'event-detail', eventId: event.id })}
+            onClick={() => router.push(paths.event(event.id))}
             className="line-clamp-1 text-left font-semibold hover:text-primary"
           >
             {event.title}
@@ -72,7 +73,7 @@ function TicketRowCard({ row }: { row: TicketRow }) {
           <span className="text-xs text-muted-foreground">· {ticket.attendeeName}</span>
           <TicketStatusBadge status={ticket.status} />
         </div>
-        <Button size="sm" onClick={() => navigate({ name: 'ticket-detail', ticketId: ticket.id })}>
+        <Button size="sm" onClick={() => router.push(paths.ticket(ticket.id))}>
           View Ticket
         </Button>
       </div>
@@ -81,7 +82,7 @@ function TicketRowCard({ row }: { row: TicketRow }) {
 }
 
 export function MyTickets({ initialTab }: { initialTab?: 'upcoming' | 'past' | 'cancelled' }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const router = useRouter()
   const [tab, setTab] = useState<TabKey>(initialTab ?? 'upcoming')
 
   const query = useQuery({
@@ -172,7 +173,7 @@ export function MyTickets({ initialTab }: { initialTab?: 'upcoming' | 'past' | '
               icon={Ticket}
               title="No upcoming tickets"
               description="You haven't booked any upcoming events yet. Browse events and grab your next ticket!"
-              action={<Button onClick={() => navigate({ name: 'home' })}>Browse Events</Button>}
+              action={<Button onClick={() => router.push(paths.events())}>Browse Events</Button>}
             />
           ) : (
             groups.upcoming.map((r) => <TicketRowCard key={r.ticket.id} row={r} />)

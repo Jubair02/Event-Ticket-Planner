@@ -55,7 +55,7 @@ Stage Summary:
   - organizer/organizer-dashboard.tsx → OrganizerDashboard({initialTab?})
   - admin/admin-dashboard.tsx → AdminDashboard({initialTab?})
   - staff/staff-scanner.tsx → StaffScanner()
-- Demo accounts: admin@ticketbd.com/admin123, organizer@ticketbd.com/organizer123, customer@ticketbd.com/customer123, staff@ticketbd.com/staff123
+- Seeded accounts: admin@ticketbd.com, organizer@ticketbd.com, customer@ticketbd.com, staff@ticketbd.com (passwords come from SEED_ADMIN_PASSWORD / SEED_DEMO_PASSWORD, or are generated per seed run — see docs/api-contract.md §6)
 
 ---
 Task ID: 7-b

@@ -13,10 +13,12 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { apiGet, apiPost } from '@/lib/api'
+import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
+import { paths } from '@/lib/routes'
 import { categoryEmoji, formatBDT, formatEventDate, formatTime } from '@/lib/format'
 import { PLATFORM_FEE_RATE } from '@/lib/constants'
-import type { EventDetail as EventDetailDTO, TicketTypeDTO } from '@/lib/types'
+import type { CheckoutItem, EventDetail as EventDetailDTO, TicketTypeDTO } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -47,13 +49,20 @@ interface CreateOrderResponse {
   }
 }
 
-export function Checkout({ eventId }: { eventId: string }) {
-  const navigate = useAppStore((s) => s.navigate)
+export function Checkout({
+  eventId,
+  items: handoffItems,
+}: {
+  eventId: string
+  /**
+   * Selection handed over from the event page, decoded from `?t=` by the route.
+   * It travels in the URL rather than in memory, so a refresh on the checkout
+   * page keeps the tickets the customer actually picked.
+   */
+  items?: CheckoutItem[]
+}) {
+  const router = useRouter()
   const user = useAppStore((s) => s.user)
-  const view = useAppStore((s) => s.view)
-
-  // Selection handed over from the event page, when the user came that way.
-  const handoffItems = view.name === 'checkout' && view.eventId === eventId ? view.items : undefined
 
   const [name, setName] = useState(() => user?.name ?? '')
   const [email, setEmail] = useState(() => user?.email ?? '')
@@ -125,7 +134,7 @@ export function Checkout({ eventId }: { eventId: string }) {
     }) => apiPost<CreateOrderResponse>('/api/orders', payload),
     onSuccess: (data) => {
       toast.success('Order created — redirecting to payment…')
-      navigate({ name: 'payment', orderId: data.order.id })
+      router.push(paths.order(data.order.id))
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Failed to create order')
@@ -164,7 +173,7 @@ export function Checkout({ eventId }: { eventId: string }) {
           title="Event not found"
           description="We could not load this event for checkout."
           action={
-            <Button onClick={() => navigate({ name: 'home' })}>
+            <Button onClick={() => router.push(paths.events())}>
               <ArrowLeft className="h-4 w-4" /> Back to Events
             </Button>
           }
@@ -193,7 +202,7 @@ export function Checkout({ eventId }: { eventId: string }) {
           <h1 className="text-2xl font-bold">Checkout</h1>
           <p className="mt-1 text-sm text-muted-foreground">Review your tickets and complete attendee details.</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => navigate({ name: 'event-detail', eventId })}>
+        <Button variant="ghost" size="sm" onClick={() => router.push(paths.event(eventId))}>
           <ArrowLeft className="h-4 w-4" /> Back to event
         </Button>
       </div>
@@ -213,7 +222,7 @@ export function Checkout({ eventId }: { eventId: string }) {
           </div>
           <div className="min-w-0 flex-1">
             <button
-              onClick={() => navigate({ name: 'event-detail', eventId })}
+              onClick={() => router.push(paths.event(eventId))}
               className="line-clamp-1 text-left font-semibold hover:text-primary"
             >
               {event.title}

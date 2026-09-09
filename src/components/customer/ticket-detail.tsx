@@ -19,7 +19,8 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { apiGet } from '@/lib/api'
-import { useAppStore } from '@/lib/store'
+import { useRouter } from 'next/navigation'
+import { paths } from '@/lib/routes'
 import { categoryEmoji, categoryLabel, formatDateTimeTime, formatEventDate, formatTime } from '@/lib/format'
 import type { OrderDTO, TicketDTO } from '@/lib/types'
 import {
@@ -83,7 +84,7 @@ function findTicket(orders: OrderDTO[], ticketId: string) {
 }
 
 export function TicketDetail({ ticketId }: { ticketId: string }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const router = useRouter()
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -246,7 +247,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   {query.isFetching ? 'Retrying…' : 'Try again'}
                 </Button>
               )}
-              <Button variant="outline" onClick={() => navigate({ name: 'my-tickets' })}>
+              <Button variant="outline" onClick={() => router.push(paths.tickets())}>
                 <ArrowLeft className="h-4 w-4" /> Back to my tickets
               </Button>
             </div>
@@ -264,7 +265,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       {/* ---------- Top bar (never printed) ---------- */}
       <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
-        <Button variant="ghost" size="sm" onClick={() => navigate({ name: 'my-tickets' })}>
+        <Button variant="ghost" size="sm" onClick={() => router.push(paths.tickets())}>
           <ArrowLeft className="h-4 w-4" /> My tickets
         </Button>
         <div className="flex items-center gap-2">

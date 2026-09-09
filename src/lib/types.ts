@@ -1,4 +1,8 @@
 // ===== Shared DTO types (JSON over the wire — dates are ISO strings) =====
+//
+// Money crosses the wire as an integer number of paisa and every such field is
+// named with a `Minor` suffix. Never a float, never taka. `@/lib/money` has the
+// reasoning and the only conversions; `formatMinor` is what renders one.
 
 export type Role = 'SUPER_ADMIN' | 'ORGANIZER' | 'CUSTOMER' | 'EVENT_STAFF'
 
@@ -29,7 +33,8 @@ export interface TicketTypeDTO {
   eventId: string
   name: string
   description: string | null
-  price: number
+  /** Unit price in paisa. */
+  priceMinor: number
   totalQuantity: number
   soldQuantity: number
   maxPerOrder: number
@@ -48,6 +53,8 @@ export interface OrganizerInfo {
 
 export interface EventListItem {
   id: string
+  /** URL slug. Null only for rows created before slugs existed. */
+  slug: string | null
   title: string
   description: string
   category: string
@@ -77,12 +84,16 @@ export interface TicketDTO {
   status: 'ACTIVE' | 'CHECKED_IN' | 'CANCELLED' | 'INVALID'
   checkedInAt: string | null
   createdAt: string
-  ticketType?: { id: string; name: string; price: number }
+  ticketType?: { id: string; name: string; priceMinor: number }
 }
 
 export interface PaymentDTO {
   id: string
-  amount: number
+  /** Captured from the customer, in paisa. */
+  amountMinor: number
+  /** What the gateway keeps, in paisa. Borne by the organizer, not the buyer. */
+  gatewayFeeMinor: number
+  currency: string
   provider: string
   method: string | null
   transactionId: string | null
@@ -94,10 +105,13 @@ export interface OrderDTO {
   id: string
   orderNumber: string
   eventId: string
-  subtotal: number
-  platformFee: number
-  totalAmount: number
-  paymentStatus: 'PENDING' | 'PROCESSING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUNDED'
+  /** Paisa. `totalMinor = subtotalMinor - discountMinor + platformFeeMinor`. */
+  subtotalMinor: number
+  discountMinor: number
+  platformFeeMinor: number
+  totalMinor: number
+  currency: string
+  paymentStatus: PaymentStatus
   status: string
   /** Attendee captured at checkout; null on orders created before this existed. */
   attendeeName?: string | null
@@ -106,6 +120,7 @@ export interface OrderDTO {
   createdAt: string
   event?: {
     id: string
+    slug?: string | null
     title: string
     banner: string | null
     venue: string
@@ -128,8 +143,11 @@ export interface OrganizerStats {
   totalEvents: number
   activeEvents: number
   ticketsSold: number
-  revenue: number
+  /** Gross paid-order value in paisa, before refunds, fees and payouts. */
+  revenueMinor: number
   checkIns: number
+  /** Events in PENDING_APPROVAL. Returned by the API; drives the overview's next steps. */
+  pendingApprovals?: number
 }
 
 export interface EventAnalytics {
@@ -137,13 +155,14 @@ export interface EventAnalytics {
   totalTickets: number
   sold: number
   available: number
-  revenue: number
+  /** Gross paid-order value in paisa. */
+  revenueMinor: number
   checkIns: number
   notArrived: number
   recentOrders: Array<{
     id: string
     orderNumber: string
-    totalAmount: number
+    totalMinor: number
     paymentStatus: string
     createdAt: string
     user: { name: string }
@@ -152,10 +171,10 @@ export interface EventAnalytics {
   ticketTypeBreakdown: Array<{
     id: string
     name: string
-    price: number
+    priceMinor: number
     totalQuantity: number
     soldQuantity: number
-    revenue: number
+    revenueMinor: number
   }>
 }
 
@@ -170,7 +189,8 @@ export interface AdminStats {
   pendingOrganizers: number
   totalOrders: number
   paidOrders: number
-  totalRevenue: number
+  /** Gross paid-order value in paisa. */
+  totalRevenueMinor: number
   totalTicketsSold: number
   totalCheckIns: number
 }
@@ -221,7 +241,7 @@ export interface ValidateResult {
     attendeeName: string
     status: string
     checkedInAt: string | null
-    ticketType: { name: string; price: number }
+    ticketType: { name: string; priceMinor: number }
     event: { id: string; title: string; startDate: string; startTime: string; venue: string }
     user: { name: string }
     order: { orderNumber: string }
@@ -237,3 +257,43 @@ export interface CheckInRow {
   ticketType: { name: string }
   user: { name: string }
 }
+
+/**
+ * A ticket selection handed from the event page to checkout. Travels in the
+ * `/checkout/[eventId]?t=…` query string, so a refresh keeps the choice.
+ */
+export interface CheckoutItem {
+  ticketTypeId: string
+  quantity: number
+}
+
+// ===== Financial status values =====
+//
+// The database stores these as text (matching the convention used for every
+// other status in this schema). These unions are what code should narrow to,
+// and what a write path should validate against.
+
+export type PaymentStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'PAID'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'REFUNDED'
+  | 'PARTIALLY_REFUNDED'
+
+export type RefundStatus =
+  | 'REQUESTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'FAILED'
+
+export type PayoutStatus = 'PENDING' | 'PROCESSING' | 'PAID' | 'FAILED' | 'CANCELLED'
+
+export type SettlementStatus = 'DRAFT' | 'OPEN' | 'APPROVED' | 'PAID' | 'CANCELLED'
+
+export type PayoutMethodType = 'BANK_TRANSFER' | 'BKASH' | 'NAGAD'
+
+export type PayoutMethodStatus = 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'DISABLED'
