@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -22,15 +22,9 @@ import {
  * own route and its own file.
  */
 
-/** Small inline hook: debounce a fast-changing value (search inputs). */
-export function useDebounced(value: string, delay = 300): string {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return v
-}
+// Debouncing moved to `@/hooks/use-debounced` when the public search box
+// needed it too. Re-exported so the admin sections keep one import.
+export { useDebounced } from '@/hooks/use-debounced'
 
 /**
  * Run `fn` over every item with a concurrency cap, collecting per-item outcomes.

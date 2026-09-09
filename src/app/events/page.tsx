@@ -13,8 +13,14 @@ export const metadata: Metadata = {
   twitter: { title: `${TITLE} · TicketBD`, description: DESCRIPTION },
 }
 
-export default function EventsPage() {
+export default async function EventsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; city?: string; category?: string }>
+}) {
+  const { q, city, category } = await searchParams
+
   // Same component as the homepage, minus the marketing sections: this route is
-  // the searchable index, so the grid and filters are the whole point.
-  return <HomePage browseOnly />
+  // the searchable index, so the search card and the grid are the whole point.
+  return <HomePage browseOnly initialFilters={{ q, city, category }} />
 }

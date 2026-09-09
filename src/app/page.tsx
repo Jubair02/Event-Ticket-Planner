@@ -6,6 +6,13 @@ export const metadata: Metadata = {
   alternates: { canonical: '/' },
 }
 
-export default function Home() {
-  return <HomePage />
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; city?: string; category?: string }>
+}) {
+  // Filters are read here rather than in the client so the correct chip is
+  // active on first paint and a refresh lands on the same results.
+  const { q, city, category } = await searchParams
+  return <HomePage initialFilters={{ q, city, category }} />
 }
