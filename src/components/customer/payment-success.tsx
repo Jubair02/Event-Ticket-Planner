@@ -13,7 +13,7 @@ import {
 import { apiGet } from '@/lib/api'
 import { useRouter } from 'next/navigation'
 import { paths } from '@/lib/routes'
-import { categoryEmoji, formatBDT, formatEventDate, formatTime } from '@/lib/format'
+import { categoryEmoji, formatMinor, formatEventDate, formatTime } from '@/lib/format'
 import type { OrderDTO } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -118,7 +118,7 @@ export function PaymentSuccess({ orderId }: { orderId: string }) {
             </div>
             <div className="rounded-lg bg-muted/50 p-3">
               <p className="text-xs text-muted-foreground">Total Paid</p>
-              <p className="font-semibold text-primary">{formatBDT(order.totalAmount)}</p>
+              <p className="font-semibold text-primary">{formatMinor(order.totalMinor)}</p>
             </div>
             <div className="rounded-lg bg-muted/50 p-3">
               <p className="text-xs text-muted-foreground">Payment Method</p>

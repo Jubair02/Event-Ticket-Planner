@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonSafe } from '@/lib/serialize'
 import { AuthError, requireAuth } from '@/lib/auth'
 
 const ORDER_INCLUDE = {
@@ -29,7 +30,7 @@ const ORDER_INCLUDE = {
       status: true,
       checkedInAt: true,
       createdAt: true,
-      ticketType: { select: { id: true, name: true, price: true } },
+      ticketType: { select: { id: true, name: true, priceMinor: true } },
     },
   },
   payments: true,
@@ -51,7 +52,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'You do not have permission to view this order' }, { status: 403 })
     }
 
-    return NextResponse.json({ order })
+    return NextResponse.json(jsonSafe({ order }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('GET /api/orders/[id] failed:', e instanceof Error ? e.message : e)

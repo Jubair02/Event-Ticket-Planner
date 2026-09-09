@@ -67,7 +67,11 @@ export const paths = {
   organizerEvents: (status?: string) =>
     withQuery('/organizer/events', { status: status && status !== 'ALL' ? status : undefined }),
   organizerEvent: (eventId: string) => `/organizer/events/${eventId}`,
-  organizerOrders: () => '/organizer/orders',
+  organizerOrders: (query?: { status?: string; q?: string }) =>
+    withQuery('/organizer/orders', {
+      status: query?.status && query.status !== 'ALL' ? query.status : undefined,
+      q: query?.q,
+    }),
   organizerAnalytics: () => '/organizer/analytics',
   organizerPayouts: () => '/organizer/payouts',
   organizerStaff: () => '/organizer/staff',
@@ -85,12 +89,23 @@ export const paths = {
       role: query?.role && query.role !== 'ALL' ? query.role : undefined,
       q: query?.q,
     }),
-  adminPayments: (status?: string) =>
-    withQuery('/admin/payments', { status: status && status !== 'ALL' ? status : undefined }),
-  adminRefunds: () => '/admin/refunds',
-  adminPayouts: (status?: string) =>
-    withQuery('/admin/payouts', { status: status && status !== 'ALL' ? status : undefined }),
-  adminAudit: () => '/admin/audit',
+  adminPayments: (query?: { status?: string; q?: string }) =>
+    withQuery('/admin/payments', {
+      status: query?.status && query.status !== 'ALL' ? query.status : undefined,
+      q: query?.q,
+    }),
+  adminRefunds: (query?: { status?: string; q?: string }) =>
+    withQuery('/admin/refunds', {
+      status: query?.status && query.status !== 'ALL' ? query.status : undefined,
+      q: query?.q,
+    }),
+  adminPayouts: (query?: { status?: string; q?: string }) =>
+    withQuery('/admin/payouts', {
+      status: query?.status && query.status !== 'ALL' ? query.status : undefined,
+      q: query?.q,
+    }),
+  adminAudit: (source?: string) =>
+    withQuery('/admin/audit', { source: source && source !== 'ALL' ? source : undefined }),
 
   staff: () => '/staff',
   /** The scanner itself; the event being scanned is URL state, so refresh keeps it. */

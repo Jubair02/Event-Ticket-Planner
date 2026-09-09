@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireOrganizer } from '@/lib/auth'
 import {
-  MIN_PAYOUT_AMOUNT,
+  MIN_PAYOUT_MINOR,
   PAYOUT_HOLD_DAYS,
   computeBalances,
+  ledgerTypeFilter,
   safePayoutMethod,
 } from '@/lib/settlement'
 import { serialiseLedgerEntry, serialisePayout } from '@/lib/settlement-dto'
@@ -29,11 +30,12 @@ export async function GET() {
         where: { organizerId: organizer.id },
         orderBy: { createdAt: 'desc' },
         take: 5,
-        include: { method: true },
+        include: { payoutMethod: true },
       }),
       db.ledgerEntry.findMany({
-        where: { organizerId: organizer.id },
-        orderBy: { createdAt: 'desc' },
+        // The organizer's own movements only — see ledgerTypeFilter.
+        where: { organizerId: organizer.id, ...ledgerTypeFilter() },
+        orderBy: { occurredAt: 'desc' },
         take: 8,
       }),
     ])
@@ -43,7 +45,7 @@ export async function GET() {
       methods: methods.map(safePayoutMethod),
       payouts: payouts.map(serialisePayout),
       recentLedger: recentLedger.map(serialiseLedgerEntry),
-      policy: { holdDays: PAYOUT_HOLD_DAYS, minPayout: MIN_PAYOUT_AMOUNT },
+      policy: { holdDays: PAYOUT_HOLD_DAYS, minPayoutMinor: MIN_PAYOUT_MINOR },
     })
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })

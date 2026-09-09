@@ -86,6 +86,14 @@ export interface PostGroupInput {
   /** When the money moved. Defaults to now. */
   occurredAt?: Date
   description?: string
+  /**
+   * When an organizer-payable credit becomes withdrawable. Applied only to the
+   * `ORGANIZER_PAYABLE` line: the platform's own revenue and the cash at the
+   * gateway are not held back, so dating them would misreport both.
+   */
+  availableAt?: Date | null
+  /** The admin behind a manual posting. Null for anything the system posts. */
+  createdById?: string | null
 }
 
 /** Raised when a posting would not balance, so it is never written. */
@@ -142,7 +150,15 @@ export function validateLines(lines: LedgerLine[]): { debitMinor: Minor; creditM
  */
 export async function postLedgerGroup(
   tx: Prisma.TransactionClient,
-  { kind, lines, refs = {}, occurredAt, description }: PostGroupInput
+  {
+    kind,
+    lines,
+    refs = {},
+    occurredAt,
+    description,
+    availableAt,
+    createdById,
+  }: PostGroupInput
 ): Promise<{ groupId: string; debitMinor: Minor }> {
   if (!LEDGER_KINDS.includes(kind)) throw new Error(`Unknown ledger kind: ${String(kind)}`)
   const { debitMinor } = validateLines(lines)
@@ -159,6 +175,8 @@ export async function postLedgerGroup(
       amountMinor: toDbMinor(line.amountMinor),
       currency: CURRENCY,
       description: line.description ?? description ?? null,
+      availableAt: line.account === 'ORGANIZER_PAYABLE' ? (availableAt ?? null) : null,
+      createdById: createdById ?? null,
       organizerId: refs.organizerId ?? null,
       eventId: refs.eventId ?? null,
       orderId: refs.orderId ?? null,

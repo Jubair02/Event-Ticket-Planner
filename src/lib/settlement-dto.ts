@@ -1,9 +1,10 @@
+import { fromDbMinor } from '@/lib/money'
 import {
   LEDGER_TYPE_LABELS,
   PAYOUT_METHOD_LABELS,
   PAYOUT_STATUS_LABELS,
+  ledgerEntryType,
   safePayoutMethod,
-  type LedgerType,
   type PayoutMethodType,
   type PayoutStatus,
 } from '@/lib/settlement'
@@ -13,15 +14,21 @@ import {
  *
  * Kept apart from `settlement.ts` so route handlers, the organizer wallet and
  * the admin console all serialise a ledger entry the same way — and so the
- * "never send the full account number" rule lives in exactly one place.
+ * "never send anything that identifies the account" rule lives in exactly one
+ * place.
+ *
+ * Every amount here is paisa, named `*Minor`, matching the rest of the API.
  */
 
 export interface LedgerEntryDTO {
   id: string
   type: string
   typeLabel: string
-  /** Signed whole taka; credits positive. */
-  amount: number
+  /**
+   * Signed paisa from the account holder's point of view: a credit to what we
+   * owe them is positive, a debit negative.
+   */
+  amountMinor: number
   /** ISO date when the amount matures, or null if it already has. */
   availableAt: string | null
   /** True while `availableAt` is still in the future. */
@@ -30,45 +37,54 @@ export interface LedgerEntryDTO {
   orderId: string | null
   eventId: string | null
   payoutId: string | null
-  createdAt: string
+  /** When the money moved. */
+  occurredAt: string
 }
 
 export function serialiseLedgerEntry(e: {
   id: string
-  type: string
-  amount: number
+  kind: string
+  account: string
+  direction: string
+  amountMinor: bigint | number
   availableAt: Date | null
-  description: string
+  description: string | null
   orderId: string | null
   eventId: string | null
   payoutId: string | null
-  createdAt: Date
+  occurredAt: Date
 }): LedgerEntryDTO {
+  const type = ledgerEntryType(e)
+  const amount = fromDbMinor(e.amountMinor)
   return {
     id: e.id,
-    type: e.type,
-    typeLabel: LEDGER_TYPE_LABELS[e.type as LedgerType] ?? e.type,
-    amount: e.amount,
+    type,
+    typeLabel: LEDGER_TYPE_LABELS[type] ?? type,
+    // Stored amounts are always positive with the sign carried by `direction`;
+    // a reader wants one signed number, so it is reassembled here.
+    amountMinor: e.direction === 'CREDIT' ? amount : -amount,
     availableAt: e.availableAt?.toISOString() ?? null,
     pending: e.availableAt !== null && e.availableAt.getTime() > Date.now(),
-    description: e.description,
+    description: e.description ?? '',
     orderId: e.orderId,
     eventId: e.eventId,
     payoutId: e.payoutId,
-    createdAt: e.createdAt.toISOString(),
+    occurredAt: e.occurredAt.toISOString(),
   }
 }
 
 export interface PayoutDTO {
   id: string
+  /** The `PO-YYYY-NNNNNN` number an organizer quotes when asking about it. */
   reference: string
-  amount: number
+  amountMinor: number
   status: string
   statusLabel: string
   note: string | null
   reviewNote: string | null
   reviewedAt: string | null
   reviewedByName: string | null
+  /** The bank or wallet transfer reference, once it has been paid. */
   transferRef: string | null
   paidAt: string | null
   initiatedBy: string
@@ -86,18 +102,19 @@ export interface PayoutDTO {
 
 type PayoutRow = {
   id: string
-  reference: string
-  amount: number
+  payoutNumber: string
+  amountMinor: bigint | number
   status: string
   note: string | null
   reviewNote: string | null
   reviewedAt: Date | null
   reviewedBy?: { name: string } | null
-  transferRef: string | null
+  /** Column holding the transfer reference. */
+  reference: string | null
   paidAt: Date | null
   initiatedBy: string
   createdAt: Date
-  method?: Parameters<typeof safePayoutMethod>[0] | null
+  payoutMethod?: Parameters<typeof safePayoutMethod>[0] | null
   organizer?: {
     id: string
     organizationName: string
@@ -106,18 +123,18 @@ type PayoutRow = {
 }
 
 export function serialisePayout(p: PayoutRow): PayoutDTO {
-  const method = p.method ? safePayoutMethod(p.method) : null
+  const method = p.payoutMethod ? safePayoutMethod(p.payoutMethod) : null
   return {
     id: p.id,
-    reference: p.reference,
-    amount: p.amount,
+    reference: p.payoutNumber,
+    amountMinor: fromDbMinor(p.amountMinor),
     status: p.status,
     statusLabel: PAYOUT_STATUS_LABELS[p.status as PayoutStatus] ?? p.status,
     note: p.note,
     reviewNote: p.reviewNote,
     reviewedAt: p.reviewedAt?.toISOString() ?? null,
     reviewedByName: p.reviewedBy?.name ?? null,
-    transferRef: p.transferRef,
+    transferRef: p.reference,
     paidAt: p.paidAt?.toISOString() ?? null,
     initiatedBy: p.initiatedBy,
     createdAt: p.createdAt.toISOString(),

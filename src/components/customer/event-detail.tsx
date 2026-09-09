@@ -25,11 +25,11 @@ import {
   categoryEmoji,
   categoryLabel,
   daysUntil,
-  formatBDT,
+  formatMinor,
   formatEventDate,
   formatTime,
 } from '@/lib/format'
-import { PLATFORM_FEE_RATE } from '@/lib/constants'
+import { orderTotals } from '@/lib/money'
 import type { EventDetail as EventDetailDTO } from '@/lib/types'
 import { ticketWindow } from '@/lib/ticket-window'
 import { Badge } from '@/components/ui/badge'
@@ -113,9 +113,13 @@ export function EventDetail({ eventId }: { eventId: string }) {
   }, [event, selected])
 
   const totalQty = picked.reduce((acc, r) => acc + r.qty, 0)
-  const subtotal = picked.reduce((acc, r) => acc + r.qty * r.t.price, 0)
-  const fee = Math.round(subtotal * PLATFORM_FEE_RATE)
-  const total = subtotal + fee
+  // The same helper the order route uses server-side, so the total quoted here
+  // is the total that gets stored, fee rounding included.
+  const {
+    subtotalMinor,
+    platformFeeMinor: feeMinor,
+    totalMinor,
+  } = orderTotals(picked.map((r) => ({ unitPriceMinor: r.t.priceMinor, quantity: r.qty })))
 
   function changeQty(typeId: string, delta: number) {
     if (!event) return
@@ -210,7 +214,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
                 <span className="text-muted-foreground"> × </span>
                 {t.name}
               </span>
-              <span className="shrink-0 font-medium tabular-nums">{formatBDT(qty * t.price)}</span>
+              <span className="shrink-0 font-medium tabular-nums">{formatMinor(qty * t.priceMinor)}</span>
             </li>
           ))}
         </ul>
@@ -223,15 +227,15 @@ export function EventDetail({ eventId }: { eventId: string }) {
           <dt className="text-muted-foreground">
             Tickets <span className="tabular-nums">({totalQty})</span>
           </dt>
-          <dd className="tabular-nums">{formatBDT(subtotal)}</dd>
+          <dd className="tabular-nums">{formatMinor(subtotalMinor)}</dd>
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-muted-foreground">Platform fee (3%)</dt>
-          <dd className="tabular-nums">{formatBDT(fee)}</dd>
+          <dd className="tabular-nums">{formatMinor(feeMinor)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2 text-base font-semibold">
           <dt>Total</dt>
-          <dd className="text-lg text-primary tabular-nums">{formatBDT(total)}</dd>
+          <dd className="text-lg text-primary tabular-nums">{formatMinor(totalMinor)}</dd>
         </div>
       </dl>
 
@@ -452,10 +456,10 @@ export function EventDetail({ eventId }: { eventId: string }) {
 
                           <div className="flex items-end justify-between gap-4 sm:min-w-[164px] sm:flex-col sm:items-end">
                             <div className="sm:text-right">
-                              <p className="text-lg font-semibold tabular-nums">{formatBDT(t.price)}</p>
+                              <p className="text-lg font-semibold tabular-nums">{formatMinor(t.priceMinor)}</p>
                               {qty > 0 && (
                                 <p className="text-xs text-muted-foreground tabular-nums">
-                                  {qty} × {formatBDT(t.price)} = {formatBDT(qty * t.price)}
+                                  {qty} × {formatMinor(t.priceMinor)} = {formatMinor(qty * t.priceMinor)}
                                 </p>
                               )}
                             </div>
@@ -511,7 +515,7 @@ export function EventDetail({ eventId }: { eventId: string }) {
             <p className="sr-only" role="status" aria-live="polite">
               {totalQty === 0
                 ? 'No tickets selected.'
-                : `${totalQty} ticket${totalQty === 1 ? '' : 's'} selected. Total ${formatBDT(total)}.`}
+                : `${totalQty} ticket${totalQty === 1 ? '' : 's'} selected. Total ${formatMinor(totalMinor)}.`}
             </p>
 
             {/* Mobile summary: the fee breakdown used to be desktop-only */}
@@ -535,11 +539,11 @@ export function EventDetail({ eventId }: { eventId: string }) {
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold tabular-nums">
-                {totalQty > 0 ? formatBDT(total) : 'No tickets selected'}
+                {totalQty > 0 ? formatMinor(totalMinor) : 'No tickets selected'}
               </p>
               <p className="truncate text-xs text-muted-foreground tabular-nums">
                 {totalQty > 0
-                  ? `${totalQty} ticket${totalQty === 1 ? '' : 's'} · incl. ${formatBDT(fee)} fee`
+                  ? `${totalQty} ticket${totalQty === 1 ? '' : 's'} · incl. ${formatMinor(feeMinor)} fee`
                   : 'Choose a ticket to continue'}
               </p>
             </div>

@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, Loader2, Pencil, Plus, Trash2, Users } from 'lucide-react'
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api'
-import { formatBDT, formatEventDate } from '@/lib/format'
+import { formatMinor, formatEventDate } from '@/lib/format'
+import { fromMinor, toMinor } from '@/lib/money'
 import type { EventAnalytics } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -80,7 +81,7 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
     mutationFn: () =>
       apiPost(`/api/organizer/events/${eventId}/ticket-types`, {
         name: addForm.name.trim(),
-        price: Number(addForm.price),
+        priceMinor: toMinor(addForm.price) ?? 0,
         totalQuantity: Number(addForm.totalQuantity),
         maxPerOrder: Number(addForm.maxPerOrder || '5'),
       }),
@@ -96,7 +97,7 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
     mutationFn: (f: EditTypeForm) =>
       apiPut(`/api/organizer/ticket-types/${f.id}`, {
         name: f.name.trim(),
-        price: Number(f.price),
+        priceMinor: toMinor(f.price) ?? 0,
         totalQuantity: Number(f.totalQuantity),
         maxPerOrder: Number(f.maxPerOrder || '5'),
       }),
@@ -155,7 +156,7 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
               <Tile label="Total Tickets" value={a.totalTickets} />
               <Tile label="Sold" value={a.sold} />
               <Tile label="Available" value={a.available} />
-              <Tile label="Revenue" value={formatBDT(a.revenue)} />
+              <Tile label="Revenue" value={formatMinor(a.revenueMinor)} />
             </div>
 
             {/* Check-in progress */}
@@ -272,7 +273,7 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
                       ) : (
                         <tr key={t.id} className="border-t">
                           <td className="px-3 py-2 font-medium">{t.name}</td>
-                          <td className="px-3 py-2">{formatBDT(t.price)}</td>
+                          <td className="px-3 py-2">{formatMinor(t.priceMinor)}</td>
                           <td className="px-3 py-2">
                             {t.soldQuantity}/{t.totalQuantity}
                           </td>
@@ -287,7 +288,7 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
                               </span>
                             </div>
                           </td>
-                          <td className="px-3 py-2">{formatBDT(t.revenue)}</td>
+                          <td className="px-3 py-2">{formatMinor(t.revenueMinor)}</td>
                           <td className="px-3 py-2">
                             <div className="flex justify-end gap-1">
                               <Button
@@ -299,7 +300,8 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
                                   setEditForm({
                                     id: t.id,
                                     name: t.name,
-                                    price: String(t.price),
+                                    // The input shows taka; the API speaks paisa.
+                                    price: String(fromMinor(t.priceMinor)),
                                     totalQuantity: String(t.totalQuantity),
                                     maxPerOrder: '5',
                                   })
@@ -416,7 +418,7 @@ export function EventAnalytics({ eventId, onClose }: { eventId: string; onClose:
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{o._count.tickets} {o._count.tickets === 1 ? 'ticket' : 'tickets'}</Badge>
-                          <span className="font-semibold">{formatBDT(o.totalAmount)}</span>
+                          <span className="font-semibold">{formatMinor(o.totalMinor)}</span>
                           <PaymentStatusBadge status={o.paymentStatus} />
                           <span className="w-16 text-right text-xs text-muted-foreground">{timeAgo(o.createdAt)}</span>
                         </div>

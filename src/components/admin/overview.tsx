@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, ClipboardCheck } from 'lucide-react'
 import { apiGet } from '@/lib/api'
-import { formatBDT } from '@/lib/format'
+import { formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 import type { AdminStats } from '@/lib/types'
@@ -145,7 +145,7 @@ export function AdminOverview() {
             <Skeleton className="mt-3 h-9 w-40" />
           ) : (
             <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
-              {formatBDT(s?.totalRevenue ?? 0)}
+              {formatMinor(s?.totalRevenueMinor ?? 0)}
             </p>
           )}
           <p className="mt-1 text-xs text-muted-foreground tabular-nums">

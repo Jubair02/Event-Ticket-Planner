@@ -57,6 +57,7 @@ model User {
   refundsApproved    Refund[]         @relation("RefundApprovedBy")
   refundsProcessed   Refund[]         @relation("RefundProcessedBy")
   refundAuditEntries RefundAuditLog[] @relation("RefundAuditActor")
+  reviewedPayouts    Payout[]         @relation("PayoutReviewer")
 }
 
 model Organizer {
@@ -425,6 +426,9 @@ model PayoutMethod {
 
   status    String  @default("UNVERIFIED") // UNVERIFIED | VERIFIED | REJECTED | DISABLED
   isDefault Boolean @default(false)
+  /// Soft delete. A method that has paid out has to stay readable for the
+  /// payouts that reference it, so removing one archives it instead.
+  archivedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -499,10 +503,29 @@ model Payout {
   amountMinor BigInt
   currency    String @default("BDT")
 
-  status        String  @default("PENDING") // PENDING | PROCESSING | PAID | FAILED | CANCELLED
+  /// REQUESTED -> APPROVED -> PAID, or REJECTED / CANCELLED.
+  ///
+  /// A request is an intent, not a movement: REQUESTED and APPROVED payouts
+  /// reserve funds without writing to the ledger, and the PAYOUT_PAID entry is
+  /// posted only when an admin marks the transfer paid. A rejection therefore
+  /// needs no reversing entry.
+  status String @default("REQUESTED")
+  /// The bank or wallet transfer reference, recorded when it is marked paid.
   reference     String?
   failureReason String?
+  /// MANUAL | AUTOMATIC — set so a scheduled payout runner can be told apart
+  /// from an organizer's own request without a second table.
+  initiatedBy   String  @default("MANUAL")
   initiatedById String?
+  /// What the organizer said when requesting.
+  note          String?
+  /// What the admin said when approving or rejecting.
+  reviewNote    String?
+  reviewedAt    DateTime?
+  reviewedById  String?
+  /// The admin who approved, rejected or paid it. Kept as a relation so the
+  /// console can name them without a second lookup.
+  reviewedBy    User?     @relation("PayoutReviewer", fields: [reviewedById], references: [id])
 
   scheduledFor DateTime?
   paidAt       DateTime?
@@ -550,11 +573,21 @@ model LedgerEntry {
   payoutId     String?
   settlementId String?
 
+  /// When an organizer-payable credit becomes withdrawable.
+  ///
+  /// Ticket money is held on the organizer's behalf for an event that has not
+  /// happened yet, so it is not payable on the spot: sale credits mature at
+  /// event end plus a hold that keeps the refund window covered. Null means
+  /// matured already, which is the case for fees, payouts and adjustments.
+  availableAt DateTime?
+  /// The admin behind a manual entry. Null for anything the system posted.
+  createdById String?
   /// When the money moved, which is not always when the row was written.
   occurredAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
   @@index([groupId])
+  @@index([organizerId, availableAt])
   @@index([account, occurredAt])
   @@index([organizerId, account])
   @@index([orderId])

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { jsonSafe } from '@/lib/serialize'
 import { EVENT_STATUS_LABELS } from '@/lib/constants'
 
 const ACTION_STATUS: Record<string, string | undefined> = {
@@ -59,7 +60,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ticketTypes: true,
       },
     })
-    return NextResponse.json({ event: updated })
+    return NextResponse.json(jsonSafe({ event: updated }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('PUT /api/admin/events/[id] failed:', e instanceof Error ? e.message : e)

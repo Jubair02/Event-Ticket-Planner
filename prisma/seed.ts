@@ -3,6 +3,13 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { slugify } from '../src/lib/slug'
+import { MINOR_PER_UNIT, fromDbMinor, orderTotals, toDbMinor } from '../src/lib/money'
+
+/**
+ * Seed prices are written in taka so they stay readable next to the ticket
+ * names; the column stores paisa. `taka(1500)` is ৳1,500 -> 150000.
+ */
+const taka = (amount: number) => amount * MINOR_PER_UNIT
 
 const db = new PrismaClient()
 
@@ -162,9 +169,9 @@ async function main() {
       featured: true,
       ticketTypes: {
         create: [
-          { name: 'General', description: 'Standing zone access', price: 500, totalQuantity: 1000, maxPerOrder: 5 },
-          { name: 'VIP', description: 'Reserved seating + food voucher', price: 1500, totalQuantity: 300, maxPerOrder: 4 },
-          { name: 'VVIP', description: 'Front row lounge + backstage tour + dinner', price: 3000, totalQuantity: 100, maxPerOrder: 2 },
+          { name: 'General', description: 'Standing zone access', priceMinor: taka(500), totalQuantity: 1000, maxPerOrder: 5 },
+          { name: 'VIP', description: 'Reserved seating + food voucher', priceMinor: taka(1500), totalQuantity: 300, maxPerOrder: 4 },
+          { name: 'VVIP', description: 'Front row lounge + backstage tour + dinner', priceMinor: taka(3000), totalQuantity: 100, maxPerOrder: 2 },
         ],
       },
     },
@@ -190,9 +197,9 @@ async function main() {
       featured: true,
       ticketTypes: {
         create: [
-          { name: 'Early Bird', description: 'Limited early access pass', price: 1000, totalQuantity: 200, maxPerOrder: 4 },
-          { name: 'Standard', description: 'Full 2-day access', price: 2000, totalQuantity: 500, maxPerOrder: 5 },
-          { name: 'VIP Pass', description: 'Front rows + speaker dinner + workshop priority', price: 5000, totalQuantity: 50, maxPerOrder: 2 },
+          { name: 'Early Bird', description: 'Limited early access pass', priceMinor: taka(1000), totalQuantity: 200, maxPerOrder: 4 },
+          { name: 'Standard', description: 'Full 2-day access', priceMinor: taka(2000), totalQuantity: 500, maxPerOrder: 5 },
+          { name: 'VIP Pass', description: 'Front rows + speaker dinner + workshop priority', priceMinor: taka(5000), totalQuantity: 50, maxPerOrder: 2 },
         ],
       },
     },
@@ -216,8 +223,8 @@ async function main() {
       status: 'PUBLISHED',
       ticketTypes: {
         create: [
-          { name: 'Day Pass', description: 'Single day entry', price: 200, totalQuantity: 800, maxPerOrder: 8 },
-          { name: 'Family Pack', description: '4 entries + 8 food coupons', price: 800, totalQuantity: 150, maxPerOrder: 3 },
+          { name: 'Day Pass', description: 'Single day entry', priceMinor: taka(200), totalQuantity: 800, maxPerOrder: 8 },
+          { name: 'Family Pack', description: '4 entries + 8 food coupons', priceMinor: taka(800), totalQuantity: 150, maxPerOrder: 3 },
         ],
       },
     },
@@ -241,7 +248,7 @@ async function main() {
       status: 'PUBLISHED',
       ticketTypes: {
         create: [
-          { name: 'Standard', description: 'Full day access + lunch', price: 1500, totalQuantity: 300, maxPerOrder: 5 },
+          { name: 'Standard', description: 'Full day access + lunch', priceMinor: taka(1500), totalQuantity: 300, maxPerOrder: 5 },
         ],
       },
     },
@@ -265,8 +272,8 @@ async function main() {
       status: 'PUBLISHED',
       ticketTypes: {
         create: [
-          { name: 'Gamer Pass', description: '3-day entry + tournament registration', price: 800, totalQuantity: 400, maxPerOrder: 4 },
-          { name: 'Spectator', description: '3-day entry, no tournament', price: 300, totalQuantity: 600, maxPerOrder: 6 },
+          { name: 'Gamer Pass', description: '3-day entry + tournament registration', priceMinor: taka(800), totalQuantity: 400, maxPerOrder: 4 },
+          { name: 'Spectator', description: '3-day entry, no tournament', priceMinor: taka(300), totalQuantity: 600, maxPerOrder: 6 },
         ],
       },
     },
@@ -290,7 +297,7 @@ async function main() {
       status: 'PUBLISHED',
       ticketTypes: {
         create: [
-          { name: 'General', description: 'Open ground seating', price: 300, totalQuantity: 600, maxPerOrder: 6 },
+          { name: 'General', description: 'Open ground seating', priceMinor: taka(300), totalQuantity: 600, maxPerOrder: 6 },
         ],
       },
     },
@@ -314,8 +321,8 @@ async function main() {
       status: 'PUBLISHED',
       ticketTypes: {
         create: [
-          { name: 'Participant Pass', description: '3-day camp + kit + certificate', price: 2500, totalQuantity: 150, maxPerOrder: 2 },
-          { name: 'Spectator', description: 'Watch the camp sessions', price: 100, totalQuantity: 300, maxPerOrder: 5 },
+          { name: 'Participant Pass', description: '3-day camp + kit + certificate', priceMinor: taka(2500), totalQuantity: 150, maxPerOrder: 2 },
+          { name: 'Spectator', description: 'Watch the camp sessions', priceMinor: taka(100), totalQuantity: 300, maxPerOrder: 5 },
         ],
       },
     },
@@ -339,8 +346,8 @@ async function main() {
       status: 'PUBLISHED',
       ticketTypes: {
         create: [
-          { name: 'Student', description: 'Valid student ID required', price: 300, totalQuantity: 80, maxPerOrder: 2 },
-          { name: 'Professional', description: 'Includes lunch + resources', price: 800, totalQuantity: 120, maxPerOrder: 4 },
+          { name: 'Student', description: 'Valid student ID required', priceMinor: taka(300), totalQuantity: 80, maxPerOrder: 2 },
+          { name: 'Professional', description: 'Includes lunch + resources', priceMinor: taka(800), totalQuantity: 120, maxPerOrder: 4 },
         ],
       },
     },
@@ -364,7 +371,7 @@ async function main() {
       city: 'Dhaka',
       status: 'PENDING_APPROVAL',
       ticketTypes: {
-        create: [{ name: 'General', price: 150, totalQuantity: 500, maxPerOrder: 5 }],
+        create: [{ name: 'General', priceMinor: taka(150), totalQuantity: 500, maxPerOrder: 5 }],
       },
     },
   })
@@ -393,17 +400,22 @@ async function main() {
     const tt = await db.ticketType.findFirstOrThrow({
       where: { eventId: opts.event.id, name: opts.typeName },
     })
-    const subtotal = tt.price * opts.quantity
-    const platformFee = Math.round(subtotal * 0.03)
+    // Same helper the checkout and the order route use, so seeded orders carry
+    // exactly the totals the app would have produced (and satisfy the
+    // Order_total_consistent constraint).
+    const totals = orderTotals([
+      { unitPriceMinor: fromDbMinor(tt.priceMinor), quantity: opts.quantity },
+    ])
     const createdAt = new Date(Date.now() - opts.daysAgo * 24 * 3600 * 1000)
     const order = await db.order.create({
       data: {
         orderNumber: `ORD-${createdAt.getFullYear()}-${crypto.randomInt(100000, 1000000)}`,
         userId: opts.user.id,
         eventId: opts.event.id,
-        subtotal,
-        platformFee,
-        totalAmount: subtotal + platformFee,
+        subtotalMinor: toDbMinor(totals.subtotalMinor),
+        discountMinor: toDbMinor(totals.discountMinor),
+        platformFeeMinor: toDbMinor(totals.platformFeeMinor),
+        totalMinor: toDbMinor(totals.totalMinor),
         paymentStatus: 'PAID',
         status: 'CONFIRMED',
         createdAt,
@@ -412,7 +424,7 @@ async function main() {
     await db.payment.create({
       data: {
         orderId: order.id,
-        amount: subtotal + platformFee,
+        amountMinor: toDbMinor(totals.totalMinor),
         provider: 'SSLCOMMERZ',
         method: opts.method || 'bKash',
         transactionId: `SSL${createdAt.getTime()}${crypto.randomInt(1000, 10000)}`,

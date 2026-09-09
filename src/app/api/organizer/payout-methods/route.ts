@@ -83,8 +83,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Matched on the last four digits plus the account name, because the full
+    // number is deliberately never stored (see the PayoutMethod comment in
+    // schema.prisma). That is a slightly weaker check than comparing whole
+    // numbers: two accounts at the same bank sharing a name and last four
+    // digits would be treated as one. Holding every organizer's full account
+    // number to sharpen a convenience check is the worse trade.
     const duplicate = await db.payoutMethod.findFirst({
-      where: { organizerId: organizer.id, archivedAt: null, type, accountNumber },
+      where: {
+        organizerId: organizer.id,
+        archivedAt: null,
+        type,
+        accountName,
+        accountLast4: accountNumber.slice(-4),
+      },
     })
     if (duplicate) {
       return NextResponse.json({ error: 'That account is already saved' }, { status: 400 })
@@ -106,10 +118,12 @@ export async function POST(req: NextRequest) {
           organizerId: organizer.id,
           type: type as PayoutMethodType,
           accountName,
-          accountNumber,
+          // Only the last four digits are kept; `accountNumber` is used to
+          // derive them and then goes out of scope with the request.
           accountLast4: accountNumber.slice(-4),
+          label: accountName,
           bankName: isBank ? bankName : null,
-          branch: isBank ? String(body.branch ?? '').trim() || null : null,
+          branchName: isBank ? String(body.branch ?? '').trim() || null : null,
           isDefault: makeDefault,
         },
       })

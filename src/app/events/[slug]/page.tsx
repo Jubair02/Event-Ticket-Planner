@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound, permanentRedirect } from 'next/navigation'
 import { db } from '@/lib/db'
+import { fromDbMinor, fromMinor } from '@/lib/money'
 import { absoluteUrl } from '@/lib/routes'
 import { looksLikeId } from '@/lib/slug'
 import { categoryLabel, formatEventDate, formatTime } from '@/lib/format'
@@ -33,7 +34,7 @@ async function findEvent(segment: string) {
       address: true,
       city: true,
       organizer: { select: { organizationName: true } },
-      ticketTypes: { select: { price: true, totalQuantity: true, soldQuantity: true } },
+      ticketTypes: { select: { priceMinor: true, totalQuantity: true, soldQuantity: true } },
     },
   })
 }
@@ -99,7 +100,9 @@ export default async function EventPage({ params }: { params: Promise<{ slug: st
   }
 
   const isPublic = PUBLIC_STATUSES.includes(event.status)
-  const prices = event.ticketTypes.map((t) => t.price)
+  // schema.org quotes prices as decimals, so this is one of the few places
+  // paisa are converted back to taka. `fromMinor` never rounds.
+  const pricesMinor = event.ticketTypes.map((t) => fromDbMinor(t.priceMinor))
   const remaining = event.ticketTypes.reduce(
     (sum, t) => sum + Math.max(0, t.totalQuantity - t.soldQuantity),
     0,
@@ -136,13 +139,13 @@ export default async function EventPage({ params }: { params: Promise<{ slug: st
           name: event.organizer.organizationName,
         },
         about: categoryLabel(event.category),
-        ...(prices.length > 0
+        ...(pricesMinor.length > 0
           ? {
               offers: {
                 '@type': 'AggregateOffer',
                 priceCurrency: 'BDT',
-                lowPrice: Math.min(...prices),
-                highPrice: Math.max(...prices),
+                lowPrice: fromMinor(Math.min(...pricesMinor)),
+                highPrice: fromMinor(Math.max(...pricesMinor)),
                 offerCount: event.ticketTypes.length,
                 availability:
                   remaining > 0 ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',

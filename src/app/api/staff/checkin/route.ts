@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { jsonSafe } from '@/lib/serialize'
 
 /** POST /api/staff/checkin — check an ACTIVE ticket in (assignment required). */
 export async function POST(req: NextRequest) {
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
     const ticket = await db.ticket.findUnique({
       where: { id: ticketId },
       include: {
-        ticketType: { select: { name: true, price: true } },
+        ticketType: { select: { name: true, priceMinor: true } },
         event: { select: { id: true, title: true, startDate: true, startTime: true, venue: true } },
         user: { select: { name: true } },
         order: { select: { orderNumber: true } },
@@ -47,14 +48,15 @@ export async function POST(req: NextRequest) {
         checkedInById: user.id,
       },
       include: {
-        ticketType: { select: { name: true, price: true } },
+        ticketType: { select: { name: true, priceMinor: true } },
         event: { select: { id: true, title: true, startDate: true, startTime: true, venue: true } },
         user: { select: { name: true } },
         order: { select: { orderNumber: true } },
       },
     })
 
-    return NextResponse.json({ ticket: updated })
+    // priceMinor is a bigint on the row, which NextResponse cannot serialise.
+    return NextResponse.json(jsonSafe({ ticket: updated }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('POST /api/staff/checkin failed:', e instanceof Error ? e.message : e)

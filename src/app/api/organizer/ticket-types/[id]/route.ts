@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { MAX_TICKET_PRICE_MINOR, isMinor } from '@/lib/money'
+import { jsonSafe } from '@/lib/serialize'
 
 /**
  * PUT /api/organizer/ticket-types/[id] — update an owned ticket type.
@@ -31,12 +33,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       data.description =
         typeof body.description === 'string' && body.description.trim() ? body.description.trim() : null
     }
-    if (body.price !== undefined) {
-      const price = Number(body.price)
-      if (!Number.isFinite(price) || price <= 0) {
+    if (body.priceMinor !== undefined) {
+      const priceMinor = Number(body.priceMinor)
+      if (!isMinor(priceMinor) || priceMinor <= 0) {
         return NextResponse.json({ error: 'Price must be greater than 0' }, { status: 400 })
       }
-      data.price = price
+      if (priceMinor > MAX_TICKET_PRICE_MINOR) {
+        return NextResponse.json({ error: 'Price is above the maximum allowed' }, { status: 400 })
+      }
+      data.priceMinor = priceMinor
     }
     if (body.totalQuantity !== undefined) {
       const totalQuantity = Number(body.totalQuantity)
@@ -79,7 +84,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     const updated = await db.ticketType.update({ where: { id: ticketType.id }, data })
-    return NextResponse.json({ ticketType: updated })
+    return NextResponse.json(jsonSafe({ ticketType: updated }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('PUT /api/organizer/ticket-types/[id] failed:', e instanceof Error ? e.message : e)

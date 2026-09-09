@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { jsonSafe } from '@/lib/serialize'
 
 /** POST /api/organizer/events/[id]/submit — DRAFT/REJECTED → PENDING_APPROVAL. */
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -26,7 +27,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       data: { status: 'PENDING_APPROVAL' },
       include: { ticketTypes: true },
     })
-    return NextResponse.json({ event: updated })
+    return NextResponse.json(jsonSafe({ event: updated }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('POST /api/organizer/events/[id]/submit failed:', e instanceof Error ? e.message : e)

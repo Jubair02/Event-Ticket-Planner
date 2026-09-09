@@ -52,9 +52,17 @@ ALTER TABLE "Payout" DROP CONSTRAINT IF EXISTS "Payout_amount_positive";
 ALTER TABLE "Payout" ADD  CONSTRAINT "Payout_amount_positive"
   CHECK ("amountMinor" > 0);
 
+-- The implemented workflow is request -> review -> paid. There is deliberately
+-- no PENDING/PROCESSING pair alongside it: two overlapping vocabularies for the
+-- same lifecycle is how a status ends up meaning different things in different
+-- code paths.
 ALTER TABLE "Payout" DROP CONSTRAINT IF EXISTS "Payout_status_valid";
 ALTER TABLE "Payout" ADD  CONSTRAINT "Payout_status_valid"
-  CHECK ("status" IN ('PENDING','PROCESSING','PAID','FAILED','CANCELLED'));
+  CHECK ("status" IN ('REQUESTED','APPROVED','REJECTED','PAID','CANCELLED'));
+
+ALTER TABLE "Payout" DROP CONSTRAINT IF EXISTS "Payout_initiatedBy_valid";
+ALTER TABLE "Payout" ADD  CONSTRAINT "Payout_initiatedBy_valid"
+  CHECK ("initiatedBy" IN ('MANUAL','AUTOMATIC'));
 
 ALTER TABLE "PayoutMethod" DROP CONSTRAINT IF EXISTS "PayoutMethod_type_valid";
 ALTER TABLE "PayoutMethod" ADD  CONSTRAINT "PayoutMethod_type_valid"
@@ -120,7 +128,7 @@ ALTER TABLE "LedgerEntry" ADD  CONSTRAINT "LedgerEntry_currency_supported"
 
 COMMIT;
 
--- Verification. Expect 21 rows; run after any db push.
+-- Verification. Expect 22 rows; run after any db push.
 --
 --   SELECT conrelid::regclass AS table, conname
 --     FROM pg_constraint

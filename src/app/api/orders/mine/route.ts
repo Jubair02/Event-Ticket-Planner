@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonSafe } from '@/lib/serialize'
 import { AuthError, requireAuth } from '@/lib/auth'
 
 const ORDER_INCLUDE = {
@@ -29,7 +30,7 @@ const ORDER_INCLUDE = {
       status: true,
       checkedInAt: true,
       createdAt: true,
-      ticketType: { select: { id: true, name: true, price: true } },
+      ticketType: { select: { id: true, name: true, priceMinor: true } },
     },
   },
   payments: true,
@@ -44,7 +45,7 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
       include: ORDER_INCLUDE,
     })
-    return NextResponse.json({ orders })
+    return NextResponse.json(jsonSafe({ orders }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('GET /api/orders/mine failed:', e instanceof Error ? e.message : e)

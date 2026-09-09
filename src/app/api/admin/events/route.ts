@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { jsonSafe } from '@/lib/serialize'
 
 /** GET /api/admin/events?status=&q= — moderation list of all events. */
 export async function GET(req: NextRequest) {
@@ -23,7 +24,9 @@ export async function GET(req: NextRequest) {
         ticketTypes: true,
       },
     })
-    return NextResponse.json({ events })
+    // ticketTypes carry bigint money columns, which NextResponse cannot
+    // serialise on its own.
+    return NextResponse.json(jsonSafe({ events }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('GET /api/admin/events failed:', e instanceof Error ? e.message : e)

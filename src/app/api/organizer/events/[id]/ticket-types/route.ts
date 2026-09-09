@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { MAX_TICKET_PRICE_MINOR, isMinor } from '@/lib/money'
+import { jsonSafe } from '@/lib/serialize'
 
 /** POST /api/organizer/events/[id]/ticket-types — add a ticket type to an owned event. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -22,11 +24,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
 
     const name = typeof body.name === 'string' ? body.name.trim() : ''
-    const price = Number(body.price)
+    // The wire carries paisa, not taka: the form parses what the person typed
+    // with `toMinor` and sends an integer, so no decimal ever reaches the
+    // server to be re-parsed (and re-rounded) a second way.
+    const priceMinor = Number(body.priceMinor)
     const totalQuantity = Number(body.totalQuantity)
     if (!name) return NextResponse.json({ error: 'Ticket type name is required' }, { status: 400 })
-    if (!Number.isFinite(price) || price <= 0) {
+    if (!isMinor(priceMinor) || priceMinor <= 0) {
       return NextResponse.json({ error: 'Price must be greater than 0' }, { status: 400 })
+    }
+    if (priceMinor > MAX_TICKET_PRICE_MINOR) {
+      return NextResponse.json({ error: 'Price is above the maximum allowed' }, { status: 400 })
     }
     if (!Number.isInteger(totalQuantity) || totalQuantity <= 0) {
       return NextResponse.json({ error: 'Total quantity must be greater than 0' }, { status: 400 })
@@ -51,7 +59,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         eventId: event.id,
         name,
         description: typeof body.description === 'string' && body.description.trim() ? body.description.trim() : null,
-        price,
+        priceMinor,
         totalQuantity,
         maxPerOrder,
         salesStart: salesStart || null,
@@ -59,7 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
     })
 
-    return NextResponse.json({ ticketType }, { status: 201 })
+    return NextResponse.json(jsonSafe({ ticketType }), { status: 201 })
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('POST /api/organizer/events/[id]/ticket-types failed:', e instanceof Error ? e.message : e)

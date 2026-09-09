@@ -16,8 +16,8 @@ import { apiGet, apiPost } from '@/lib/api'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
 import { paths } from '@/lib/routes'
-import { categoryEmoji, formatBDT, formatEventDate, formatTime } from '@/lib/format'
-import { PLATFORM_FEE_RATE } from '@/lib/constants'
+import { categoryEmoji, formatMinor, formatEventDate, formatTime } from '@/lib/format'
+import { orderTotals } from '@/lib/money'
 import type { CheckoutItem, EventDetail as EventDetailDTO, TicketTypeDTO } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -42,9 +42,10 @@ interface CreateOrderResponse {
   order: {
     id: string
     orderNumber: string
-    subtotal: number
-    platformFee: number
-    totalAmount: number
+    subtotalMinor: number
+    discountMinor: number
+    platformFeeMinor: number
+    totalMinor: number
     eventId: string
   }
 }
@@ -110,12 +111,20 @@ export function Checkout({
     return initial
   }, [event, qtys, handoffItems])
 
-  const subtotal = useMemo(
-    () => (event ? event.ticketTypes.reduce((acc, t) => acc + (effQtys[t.id] ?? 0) * t.price, 0) : 0),
+  // The same helper the order route uses server-side, so the total quoted here
+  // is the total that gets stored, fee rounding included.
+  const { subtotalMinor, platformFeeMinor: feeMinor, totalMinor } = useMemo(
+    () =>
+      orderTotals(
+        event
+          ? event.ticketTypes.map((t) => ({
+              unitPriceMinor: t.priceMinor,
+              quantity: effQtys[t.id] ?? 0,
+            }))
+          : [],
+      ),
     [event, effQtys],
   )
-  const fee = Math.round(subtotal * PLATFORM_FEE_RATE)
-  const total = subtotal + fee
   const totalQty = event ? event.ticketTypes.reduce((acc, t) => acc + (effQtys[t.id] ?? 0), 0) : 0
 
   function changeQty(t: TicketTypeDTO, delta: number) {
@@ -311,7 +320,7 @@ export function Checkout({
                           </Badge>
                         )}
                       </TableCell>
-                      <TableCell>{t.price === 0 ? 'Free' : formatBDT(t.price)}</TableCell>
+                      <TableCell>{t.priceMinor === 0 ? 'Free' : formatMinor(t.priceMinor)}</TableCell>
                       <TableCell>
                         {win.purchasable ? (
                           <div className="flex items-center justify-center gap-1">
@@ -341,7 +350,7 @@ export function Checkout({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right font-medium">{qty > 0 ? formatBDT(qty * t.price) : '—'}</TableCell>
+                      <TableCell className="text-right font-medium">{qty > 0 ? formatMinor(qty * t.priceMinor) : '—'}</TableCell>
                     </TableRow>
                   )
                 })}
@@ -354,15 +363,15 @@ export function Checkout({
           <div className="space-y-1.5 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Subtotal ({totalQty} ticket{totalQty === 1 ? '' : 's'})</span>
-              <span>{formatBDT(subtotal)}</span>
+              <span>{formatMinor(subtotalMinor)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Platform fee (3%)</span>
-              <span>{formatBDT(fee)}</span>
+              <span>{formatMinor(feeMinor)}</span>
             </div>
             <div className="flex justify-between text-base font-bold">
               <span>Total</span>
-              <span className="text-primary">{formatBDT(total)}</span>
+              <span className="text-primary">{formatMinor(totalMinor)}</span>
             </div>
           </div>
 
@@ -384,7 +393,7 @@ export function Checkout({
                 <Loader2 className="h-4 w-4 animate-spin" /> Processing…
               </>
             ) : (
-              <>Proceed to Payment · {formatBDT(total)}</>
+              <>Proceed to Payment · {formatMinor(totalMinor)}</>
             )}
           </Button>
           <p className="mt-3 flex items-center justify-center gap-1 text-xs text-muted-foreground">

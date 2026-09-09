@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { fromDbMinor } from '@/lib/money'
 
 /** GET /api/organizer/stats — dashboard overview numbers for the organizer. */
 export async function GET() {
@@ -18,7 +19,7 @@ export async function GET() {
           where: { event: { organizerId: organizer.id } },
         }),
         db.order.aggregate({
-          _sum: { totalAmount: true },
+          _sum: { totalMinor: true },
           where: { paymentStatus: 'PAID', event: { organizerId: organizer.id } },
         }),
         db.ticket.count({
@@ -32,7 +33,7 @@ export async function GET() {
         totalEvents,
         activeEvents,
         ticketsSold: ticketsSoldAgg._sum.soldQuantity ?? 0,
-        revenue: revenueAgg._sum.totalAmount ?? 0,
+        revenueMinor: fromDbMinor(revenueAgg._sum.totalMinor),
         checkIns,
         pendingApprovals,
       },

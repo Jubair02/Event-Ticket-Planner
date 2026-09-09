@@ -6,6 +6,7 @@
  */
 import { PrismaClient } from '@prisma/client'
 import { backfillLedger, computeBalances } from '../src/lib/settlement'
+import { formatMinor } from '../src/lib/money'
 
 const db = new PrismaClient()
 
@@ -23,7 +24,10 @@ async function main() {
   for (const o of organizers) {
     const b = await computeBalances(db, o.id)
     console.log(
-      `   ${o.organizationName}: available ${b.available}, pending ${b.pending}, paid ${b.paid} (gross ${b.grossSales}, fees ${b.platformFees}, refunds ${b.refunds})`,
+      `   ${o.organizationName}: available ${formatMinor(b.availableMinor)}, ` +
+        `pending ${formatMinor(b.pendingMinor)}, paid ${formatMinor(b.paidMinor)} ` +
+        `(gross ${formatMinor(b.grossSalesMinor)}, fees ${formatMinor(b.platformFeesMinor)}, ` +
+        `refunds ${formatMinor(b.refundsMinor)})`,
     )
   }
   console.log('')

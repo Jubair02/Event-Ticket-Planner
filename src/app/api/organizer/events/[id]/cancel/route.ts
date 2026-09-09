@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { jsonSafe } from '@/lib/serialize'
 import { clientIp } from '@/lib/rate-limit'
 import { RefundError } from '@/lib/refunds'
 import { actorFromUser, cancelEventAndRefund } from '@/lib/refund-service'
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       include: { ticketTypes: true },
     })
 
-    return NextResponse.json({ event: updated, summary })
+    return NextResponse.json(jsonSafe({ event: updated, summary }))
   } catch (e) {
     if (e instanceof RefundError) {
       return NextResponse.json({ error: e.message, code: e.code }, { status: e.status })

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonSafe } from '@/lib/serialize'
 import { getAuthUser } from '@/lib/auth'
 
 /**
@@ -29,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       }
     }
 
-    return NextResponse.json({ event })
+    return NextResponse.json(jsonSafe({ event }))
   } catch (e) {
     console.error('GET /api/events/[id] failed:', e instanceof Error ? e.message : e)
     return NextResponse.json({ error: 'Failed to load event' }, { status: 500 })

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { AuthError, generateQrToken, generateTicketCode, generateTransactionId, requireAuth } from '@/lib/auth'
-import { recordSale } from '@/lib/settlement'
+import { paymentCapturedLines, postLedgerGroup } from '@/lib/ledger'
+import { fromDbMinor } from '@/lib/money'
 
 const VALID_METHODS = ['bKash', 'Nagad', 'CARD']
 
@@ -156,15 +157,34 @@ export async function POST(req: NextRequest) {
           data: { paymentStatus: 'PAID', status: 'CONFIRMED' },
         })
 
-        // Credit the organizer in the same transaction that confirms the order,
-        // so a paid order can never exist without its ledger entries.
-        await recordSale(tx, {
-          id: order.id,
-          eventId: order.eventId,
-          subtotal: order.subtotal,
-          totalAmount: order.totalAmount,
-          event: order.event,
-        })
+        // Book the money in the same transaction that confirms the order, so a
+        // paid order can never exist without its ledger entries. The posting
+        // splits the customer's payment into our commission and what the
+        // organizer is owed, and `postLedgerGroup` refuses to write it unless
+        // those sides balance against the total.
+        //
+        // A zero-total order (a free or fully discounted ticket) moves no money,
+        // so there is nothing to book. It is skipped rather than posted as a
+        // pair of zero lines, which the ledger rejects by design — without this
+        // guard a free ticket would roll back its own fulfilment.
+        if (fromDbMinor(order.totalMinor) > 0) {
+          await postLedgerGroup(tx, {
+            kind: 'PAYMENT_CAPTURED',
+            lines: paymentCapturedLines({
+              subtotalMinor: fromDbMinor(order.subtotalMinor),
+              discountMinor: fromDbMinor(order.discountMinor),
+              platformFeeMinor: fromDbMinor(order.platformFeeMinor),
+              totalMinor: fromDbMinor(order.totalMinor),
+            }),
+            refs: {
+              organizerId: order.event.organizerId,
+              eventId: order.eventId,
+              orderId: order.id,
+              paymentId: payment.id,
+            },
+            description: `Ticket sales — ${order.event.title}`,
+          })
+        }
       })
       fulfilled = true
     } catch (err) {

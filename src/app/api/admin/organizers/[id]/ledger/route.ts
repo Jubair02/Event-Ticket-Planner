@@ -83,7 +83,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
 
     const body = (await req.json().catch(() => null)) as {
-      amount?: unknown
+      amountMinor?: unknown
       description?: unknown
     } | null
     if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
@@ -91,14 +91,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const organizer = await db.organizer.findUnique({ where: { id }, select: { id: true } })
     if (!organizer) return NextResponse.json({ error: 'Organizer not found' }, { status: 404 })
 
-    const amount = Number(body.amount)
-    if (!Number.isFinite(amount)) {
+    // Paisa, signed: positive credits the organizer, negative claws back.
+    const amountMinor = Number(body.amountMinor)
+    if (!Number.isSafeInteger(amountMinor)) {
       return NextResponse.json({ error: 'Enter an adjustment amount' }, { status: 400 })
     }
 
     const entry = await recordAdjustment({
       organizerId: id,
-      amount,
+      amountMinor,
       description: String(body.description ?? ''),
       adminId: admin.id,
     })

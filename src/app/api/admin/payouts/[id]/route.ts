@@ -47,7 +47,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const fresh = await db.payout.findUnique({
       where: { id },
       include: {
-        method: true,
+        payoutMethod: true,
         reviewedBy: { select: { name: true } },
         organizer: {
           select: { id: true, organizationName: true, user: { select: { email: true } } },

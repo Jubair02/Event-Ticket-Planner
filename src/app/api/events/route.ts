@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { jsonSafe } from '@/lib/serialize'
 
 /**
  * GET /api/events?search=&category=&city=&sort=upcoming|popular&featured=true
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
       events.sort((a, b) => sold(b) - sold(a) || a.startDate.getTime() - b.startDate.getTime())
     }
 
-    return NextResponse.json({ events })
+    return NextResponse.json(jsonSafe({ events }))
   } catch (e) {
     console.error('GET /api/events failed:', e instanceof Error ? e.message : e)
     return NextResponse.json({ error: 'Failed to load events' }, { status: 500 })

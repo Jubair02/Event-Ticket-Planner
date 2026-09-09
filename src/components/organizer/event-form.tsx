@@ -6,7 +6,8 @@ import { toast } from 'sonner'
 import { ImagePlus, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { apiPost, apiPut } from '@/lib/api'
 import { CATEGORIES, CATEGORY_LABELS, CITIES } from '@/lib/constants'
-import { formatBDT } from '@/lib/format'
+import { formatMinor } from '@/lib/format'
+import { MAX_TICKET_PRICE_MINOR, toMinor } from '@/lib/money'
 import type { EventListItem, TicketTypeDTO } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -133,7 +134,10 @@ function rowPayload(r: TicketRow) {
   return {
     name: r.name.trim(),
     description: r.description.trim() || undefined,
-    price: Number(r.price),
+    // The field holds taka as typed; the API takes paisa. `validate` has
+    // already rejected anything toMinor cannot parse, so the fallback is
+    // unreachable and exists only to satisfy the type.
+    priceMinor: toMinor(r.price) ?? 0,
     totalQuantity: Number(r.totalQuantity),
     maxPerOrder: Number(r.maxPerOrder || '5'),
     salesStart: dateToIso(r.salesStart),
@@ -216,8 +220,13 @@ export function EventForm({
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
       if (!r.name.trim()) return `Ticket type ${i + 1}: name is required`
-      const price = Number(r.price)
-      if (r.price === '' || Number.isNaN(price) || price < 0) return `Ticket type ${i + 1}: enter a valid price`
+      const priceMinor = toMinor(r.price)
+      if (r.price === '' || priceMinor === null || priceMinor < 0) {
+        return `Ticket type ${i + 1}: enter a valid price`
+      }
+      if (priceMinor > MAX_TICKET_PRICE_MINOR) {
+        return `Ticket type ${i + 1}: price is above the maximum allowed`
+      }
       const qty = Number(r.totalQuantity)
       if (!Number.isInteger(qty) || qty < 1) return `Ticket type ${i + 1}: quantity must be at least 1`
       const max = Number(r.maxPerOrder || '5')
@@ -498,7 +507,7 @@ export function EventForm({
                   <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                     <span className="font-medium">{t.name}</span>
                     <span className="text-muted-foreground">
-                      {formatBDT(t.price)} · {t.soldQuantity}/{t.totalQuantity} sold
+                      {formatMinor(t.priceMinor)} · {t.soldQuantity}/{t.totalQuantity} sold
                     </span>
                   </div>
                 ))}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { fromDbMinor } from '@/lib/money'
 
 /** GET /api/admin/stats — platform-wide overview for SUPER_ADMIN. */
 export async function GET() {
@@ -32,7 +33,7 @@ export async function GET() {
       db.organizer.count({ where: { status: 'PENDING' } }),
       db.order.count(),
       db.order.count({ where: { paymentStatus: 'PAID' } }),
-      db.order.aggregate({ _sum: { totalAmount: true }, where: { paymentStatus: 'PAID' } }),
+      db.order.aggregate({ _sum: { totalMinor: true }, where: { paymentStatus: 'PAID' } }),
       db.ticketType.aggregate({ _sum: { soldQuantity: true } }),
       db.ticket.count({ where: { status: 'CHECKED_IN' } }),
     ])
@@ -49,7 +50,7 @@ export async function GET() {
         pendingOrganizers,
         totalOrders,
         paidOrders,
-        totalRevenue: revenueAgg._sum.totalAmount ?? 0,
+        totalRevenueMinor: fromDbMinor(revenueAgg._sum.totalMinor),
         totalTicketsSold: ticketsSoldAgg._sum.soldQuantity ?? 0,
         totalCheckIns,
       },

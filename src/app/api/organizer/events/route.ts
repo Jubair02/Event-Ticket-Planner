@@ -4,11 +4,13 @@ import { AuthError, requireRole } from '@/lib/auth'
 import { CATEGORIES } from '@/lib/constants'
 import { safeHttpUrl } from '@/lib/url'
 import { uniqueEventSlug } from '@/lib/slug'
+import { MAX_TICKET_PRICE_MINOR, isMinor } from '@/lib/money'
+import { jsonSafe } from '@/lib/serialize'
 
 type TicketTypeInput = {
   name?: unknown
   description?: unknown
-  price?: unknown
+  priceMinor?: unknown
   totalQuantity?: unknown
   maxPerOrder?: unknown
   salesStart?: unknown
@@ -18,7 +20,7 @@ type TicketTypeInput = {
 type TicketTypeSeed = {
   name: string
   description: string | null
-  price: number
+  priceMinor: number
   totalQuantity: number
   maxPerOrder: number
   salesStart: Date | null
@@ -39,11 +41,15 @@ function normalizeTicketTypes(raw: unknown): { error?: string; data?: TicketType
   const data: TicketTypeSeed[] = []
   for (const t of raw as TicketTypeInput[]) {
     const name = typeof t?.name === 'string' ? t.name.trim() : ''
-    const price = Number(t?.price)
+    // Paisa on the wire; the form parses the typed decimal with `toMinor`.
+    const priceMinor = Number(t?.priceMinor)
     const totalQuantity = Number(t?.totalQuantity)
     if (!name) return { error: 'Every ticket type needs a name' }
-    if (!Number.isFinite(price) || price <= 0) {
+    if (!isMinor(priceMinor) || priceMinor <= 0) {
       return { error: `Ticket type "${name}" must have a price greater than 0` }
+    }
+    if (priceMinor > MAX_TICKET_PRICE_MINOR) {
+      return { error: `Ticket type "${name}" is priced above the maximum allowed` }
     }
     if (!Number.isInteger(totalQuantity) || totalQuantity <= 0) {
       return { error: `Ticket type "${name}" must have a total quantity greater than 0` }
@@ -58,7 +64,7 @@ function normalizeTicketTypes(raw: unknown): { error?: string; data?: TicketType
     data.push({
       name,
       description: typeof t?.description === 'string' && t.description.trim() ? t.description.trim() : null,
-      price,
+      priceMinor,
       totalQuantity,
       maxPerOrder,
       salesStart: salesStart || null,
@@ -83,7 +89,7 @@ export async function GET() {
         _count: { select: { orders: true } },
       },
     })
-    return NextResponse.json({ events })
+    return NextResponse.json(jsonSafe({ events }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('GET /api/organizer/events failed:', e instanceof Error ? e.message : e)
@@ -173,7 +179,7 @@ export async function POST(req: NextRequest) {
       include: { ticketTypes: true },
     })
 
-    return NextResponse.json({ event }, { status: 201 })
+    return NextResponse.json(jsonSafe({ event }), { status: 201 })
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('POST /api/organizer/events failed:', e instanceof Error ? e.message : e)

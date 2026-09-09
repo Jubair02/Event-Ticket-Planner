@@ -98,13 +98,20 @@ export function MyTickets({ initialTab }: { initialTab?: 'upcoming' | 'past' | '
       for (const ticket of order.tickets ?? []) rows.push({ order, ticket, event: order.event })
     }
     const cancelled = rows.filter(isCancelledRow)
+    // An event is over when it *ends*, not when it starts. Splitting on
+    // startDate filed a multi-day festival under "Past" from its second day
+    // onward — while the customer was still attending it and still needed the
+    // QR code to get back in. endDate falls back to startDate for the older
+    // rows that predate it.
+    const endsAt = (r: TicketRow) =>
+      new Date(r.event.endDate ?? r.event.startDate).getTime()
     const upcoming = rows
       .filter(
         (r) =>
           !isCancelledRow(r) &&
           r.order.paymentStatus === 'PAID' &&
           (r.ticket.status === 'ACTIVE' || r.ticket.status === 'CHECKED_IN') &&
-          new Date(r.event.startDate).getTime() >= now,
+          endsAt(r) >= now,
       )
       .sort((a, b) => new Date(a.event.startDate).getTime() - new Date(b.event.startDate).getTime())
     const past = rows
@@ -112,7 +119,7 @@ export function MyTickets({ initialTab }: { initialTab?: 'upcoming' | 'past' | '
         (r) =>
           !isCancelledRow(r) &&
           r.order.paymentStatus === 'PAID' &&
-          new Date(r.event.startDate).getTime() < now,
+          endsAt(r) < now,
       )
       .sort((a, b) => new Date(b.event.startDate).getTime() - new Date(a.event.startDate).getTime())
     const cancelledSorted = [...cancelled].sort(

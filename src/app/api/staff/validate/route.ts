@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { fromDbMinor } from '@/lib/money'
 
 /**
  * POST /api/staff/validate — look up a ticket by QR token or ticket code.
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     const ticket = await db.ticket.findFirst({
       where: { OR: [{ qrToken: code }, { ticketCode: code }] },
       include: {
-        ticketType: { select: { name: true, price: true } },
+        ticketType: { select: { name: true, priceMinor: true } },
         event: { select: { id: true, title: true, startDate: true, startTime: true, venue: true } },
         user: { select: { name: true } },
         order: { select: { orderNumber: true } },
@@ -48,7 +49,11 @@ export async function POST(req: NextRequest) {
         attendeeName: ticket.attendeeName,
         status: ticket.status,
         checkedInAt: ticket.checkedInAt,
-        ticketType: ticket.ticketType,
+        // priceMinor is a bigint on the row; NextResponse cannot serialise one.
+        ticketType: {
+          name: ticket.ticketType.name,
+          priceMinor: fromDbMinor(ticket.ticketType.priceMinor),
+        },
         event: ticket.event,
         user: ticket.user,
         order: ticket.order,

@@ -16,7 +16,7 @@ import {
 import { apiGet, apiPost } from '@/lib/api'
 import { useRouter } from 'next/navigation'
 import { paths } from '@/lib/routes'
-import { formatBDT, formatEventDate, formatTime } from '@/lib/format'
+import { formatMinor, formatEventDate, formatTime } from '@/lib/format'
 import { PAYMENT_METHODS } from '@/lib/constants'
 import type { OrderDTO } from '@/lib/types'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -176,7 +176,7 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
             {/* Amount */}
             <div className="rounded-xl bg-primary/10 p-4 text-center">
               <p className="text-xs uppercase tracking-widest text-muted-foreground">Amount Payable</p>
-              <p className="mt-1 text-3xl font-bold text-primary">{formatBDT(order.totalAmount)}</p>
+              <p className="mt-1 text-3xl font-bold text-primary">{formatMinor(order.totalMinor)}</p>
             </div>
 
             {showFailed ? (
@@ -254,7 +254,7 @@ export function PaymentGateway({ orderId }: { orderId: string }) {
                     </>
                   ) : (
                     <>
-                      <Lock className="h-4 w-4" /> Pay {formatBDT(order.totalAmount)}
+                      <Lock className="h-4 w-4" /> Pay {formatMinor(order.totalMinor)}
                     </>
                   )}
                 </Button>

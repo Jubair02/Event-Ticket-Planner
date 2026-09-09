@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import type { Html5Qrcode } from 'html5-qrcode'
 import { ApiError, apiGet, apiPost } from '@/lib/api'
-import { formatBDT, formatDateTimeTime, formatEventDate, formatTime } from '@/lib/format'
+import { formatMinor, formatDateTimeTime, formatEventDate, formatTime } from '@/lib/format'
 import { useAppStore } from '@/lib/store'
 import { paths } from '@/lib/routes'
 import type { CheckInRow, StaffAssignmentRow, ValidateResult } from '@/lib/types'
@@ -416,7 +416,7 @@ function ResultCard({
           <div className="mt-3 grid gap-2 text-sm">
             <Row label="Attendee" value={t.attendeeName || '—'} strong />
             <Row label="Customer" value={t.user.name} />
-            <Row label="Ticket" value={`${t.ticketType.name} · ${formatBDT(t.ticketType.price)}`} />
+            <Row label="Ticket" value={`${t.ticketType.name} · ${formatMinor(t.ticketType.priceMinor)}`} />
             <Row label="Ticket Code" value={t.ticketCode} mono />
             <Row label="Event" value={t.event.title} />
             <Row label="Order" value={t.order.orderNumber} mono />
@@ -439,7 +439,7 @@ function ResultCard({
           </p>
           <div className="mt-3 grid gap-2 text-sm">
             <Row label="Attendee" value={t.attendeeName || '—'} strong />
-            <Row label="Ticket" value={`${t.ticketType.name} · ${formatBDT(t.ticketType.price)}`} />
+            <Row label="Ticket" value={`${t.ticketType.name} · ${formatMinor(t.ticketType.priceMinor)}`} />
             <Row label="Ticket Code" value={t.ticketCode} mono />
             <Row
               label="Checked in at"

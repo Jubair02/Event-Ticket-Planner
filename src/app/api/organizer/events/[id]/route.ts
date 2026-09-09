@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
+import { jsonSafe } from '@/lib/serialize'
 import { CATEGORIES } from '@/lib/constants'
 import { safeHttpUrl } from '@/lib/url'
 
@@ -91,7 +92,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       where: { id: updated.id },
       include: { ticketTypes: true },
     })
-    return NextResponse.json({ event: fresh })
+    return NextResponse.json(jsonSafe({ event: fresh }))
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('PUT /api/organizer/events/[id] failed:', e instanceof Error ? e.message : e)

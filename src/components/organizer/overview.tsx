@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { apiGet } from '@/lib/api'
-import { formatBDT } from '@/lib/format'
+import { formatMinor } from '@/lib/format'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
 import { paths } from '@/lib/routes'
@@ -91,7 +91,7 @@ export function Overview() {
           label="Revenue"
           icon={Banknote}
           loading={isLoading}
-          value={formatBDT(s?.revenue ?? 0)}
+          value={formatMinor(s?.revenueMinor ?? 0)}
           hint={
             isLoading
               ? undefined

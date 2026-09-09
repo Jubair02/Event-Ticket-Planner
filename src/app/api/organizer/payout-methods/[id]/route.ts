@@ -53,7 +53,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     }
 
     const inFlight = await db.payout.count({
-      where: { methodId: id, status: { in: OPEN_PAYOUT_STATUSES } },
+      where: { payoutMethodId: id, status: { in: OPEN_PAYOUT_STATUSES } },
     })
     if (inFlight > 0) {
       return NextResponse.json(

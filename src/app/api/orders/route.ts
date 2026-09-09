@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Order, Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { AuthError, generateOrderNumber, requireAuth } from '@/lib/auth'
-import { PLATFORM_FEE_RATE } from '@/lib/constants'
+import { fromDbMinor, orderTotals, toDbMinor } from '@/lib/money'
 
 type ItemInput = { ticketTypeId?: unknown; quantity?: unknown }
 
@@ -59,7 +59,10 @@ export async function POST(req: NextRequest) {
     }
 
     const now = Date.now()
-    let subtotal = 0
+    // Collected as unit price + quantity so `orderTotals` does the arithmetic.
+    // It is the same function the checkout preview calls, so the figure quoted
+    // to the customer and the figure stored on the order cannot diverge.
+    const lines: Array<{ unitPriceMinor: number; quantity: number }> = []
     for (const item of items) {
       const tt = event.ticketTypes.find((t) => t.id === item.ticketTypeId)
       if (!tt) return NextResponse.json({ error: 'Invalid ticket type in order' }, { status: 400 })
@@ -82,11 +85,10 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         )
       }
-      subtotal += tt.price * item.quantity
+      lines.push({ unitPriceMinor: fromDbMinor(tt.priceMinor), quantity: item.quantity })
     }
 
-    const platformFee = Math.round(subtotal * PLATFORM_FEE_RATE)
-    const totalAmount = subtotal + platformFee
+    const totals = orderTotals(lines)
 
     // Order + pending payment. The pending Payment.transactionId carries the
     // canonical item list (server-side stash) until the gateway overwrites it
@@ -100,9 +102,10 @@ export async function POST(req: NextRequest) {
             orderNumber: generateOrderNumber(),
             userId: user.id,
             eventId,
-            subtotal,
-            platformFee,
-            totalAmount,
+            subtotalMinor: toDbMinor(totals.subtotalMinor),
+            discountMinor: toDbMinor(totals.discountMinor),
+            platformFeeMinor: toDbMinor(totals.platformFeeMinor),
+            totalMinor: toDbMinor(totals.totalMinor),
             paymentStatus: 'PENDING',
             status: 'CREATED',
             // Tickets are issued to this attendee, not to the buyer.
@@ -111,7 +114,7 @@ export async function POST(req: NextRequest) {
             attendeePhone,
             payments: {
               create: {
-                amount: totalAmount,
+                amountMinor: toDbMinor(totals.totalMinor),
                 provider: 'SSLCOMMERZ',
                 status: 'PENDING',
                 transactionId: itemsJson,
@@ -135,9 +138,10 @@ export async function POST(req: NextRequest) {
         order: {
           id: order.id,
           orderNumber: order.orderNumber,
-          subtotal: order.subtotal,
-          platformFee: order.platformFee,
-          totalAmount: order.totalAmount,
+          subtotalMinor: fromDbMinor(order.subtotalMinor),
+          discountMinor: fromDbMinor(order.discountMinor),
+          platformFeeMinor: fromDbMinor(order.platformFeeMinor),
+          totalMinor: fromDbMinor(order.totalMinor),
           eventId: order.eventId,
           paymentStatus: order.paymentStatus,
         },

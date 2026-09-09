@@ -1,7 +1,7 @@
 'use client'
 
 import type { EventListItem } from '@/lib/types'
-import { formatBDT, formatEventDate, categoryLabel, categoryEmoji, daysUntil } from '@/lib/format'
+import { formatMinor, formatEventDate, categoryLabel, categoryEmoji, daysUntil } from '@/lib/format'
 import Link from 'next/link'
 import { paths } from '@/lib/routes'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +9,7 @@ import { CalendarDays, MapPin, Users } from 'lucide-react'
 
 function fromPrice(event: EventListItem): number | null {
   if (!event.ticketTypes?.length) return null
-  return Math.min(...event.ticketTypes.map((t) => t.price))
+  return Math.min(...event.ticketTypes.map((t) => t.priceMinor))
 }
 
 function totalSold(event: EventListItem): number {
@@ -85,7 +85,7 @@ export function EventCard({ event }: { event: EventListItem }) {
             {min !== null ? (
               <p className="text-sm">
                 <span className="text-xs text-muted-foreground">From</span>{' '}
-                <span className="font-bold text-primary">{formatBDT(min)}</span>
+                <span className="font-bold text-primary">{formatMinor(min)}</span>
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">Tickets TBA</p>
