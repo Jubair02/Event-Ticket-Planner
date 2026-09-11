@@ -3,35 +3,79 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, Loader2, ShieldCheck, XCircle } from 'lucide-react'
+import { Building2, CheckCircle2, Loader2, ShieldCheck, XCircle } from 'lucide-react'
 import { apiGet, apiPut } from '@/lib/api'
 import { formatEventDate } from '@/lib/format'
 import { paths } from '@/lib/routes'
-import { cn } from '@/lib/utils'
 import type { AdminOrganizerRow } from '@/lib/types'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/app/empty-state'
-import { FilterChip, FilterChips, SectionHeading, entrance } from '@/components/dashboard/primitives'
+import {
+  FilterChips,
+  SearchBox,
+  SectionHeading,
+  sectionProps,
+  type FilterOption,
+} from '@/components/dashboard/primitives'
+import { AccountStatusBadge, OrganizerStatusBadge } from '@/components/dashboard/status-badges'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
-import { BulkBar, ConfirmDialog, mapLimit, reportBulk, useSelection, type BulkAction } from './shared'
+import {
+  ConsoleActions,
+  ConsoleCell,
+  ConsoleRow,
+  ConsoleSkeleton,
+  ConsoleTable,
+  ConsoleToolbar,
+  RowIdentity,
+  StatStrip,
+  TruncatedNote,
+} from './console'
+import {
+  BulkBar,
+  ConfirmDialog,
+  mapLimit,
+  reportBulk,
+  useDebounced,
+  useSelection,
+  type BulkAction,
+} from './shared'
 
-// ============================= Organizers =============================
+interface OrganizersResponse {
+  organizers: AdminOrganizerRow[]
+  counts: Record<string, number>
+  truncated: boolean
+}
 
 const ORGANIZER_FILTERS = [
-  { v: 'ALL', label: 'All' },
-  { v: 'PENDING', label: 'Pending' },
-  { v: 'APPROVED', label: 'Approved' },
-  { v: 'REJECTED', label: 'Rejected' },
+  { value: 'ALL', label: 'All' },
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
 ]
 
-export function AdminOrganizers({ initialStatus }: { initialStatus: string }) {
+const COLUMNS = [
+  { label: 'Select', srOnly: true, className: 'w-10' },
+  { label: 'Organization' },
+  { label: 'Contact' },
+  { label: 'Events', className: 'text-center' },
+  { label: 'Status' },
+  { label: 'Actions', srOnly: true, className: 'text-right' },
+]
+
+export function AdminOrganizers({
+  initialStatus,
+  initialSearch = '',
+}: {
+  initialStatus: string
+  initialSearch?: string
+}) {
   // Seeded from the URL by the page, then mirrored back into it: a refresh or a
   // shared link reopens the same filtered queue.
   const [statusFilter, setStatusFilter] = useState(initialStatus)
-  useUrlQuery(paths.adminOrganizers(statusFilter))
+  const [search, setSearch] = useState(initialSearch)
+  const q = useDebounced(search)
+  useUrlQuery(paths.adminOrganizers({ status: statusFilter, q: q.trim() }))
 
   const qc = useQueryClient()
   const selection = useSelection()
@@ -39,14 +83,18 @@ export function AdminOrganizers({ initialStatus }: { initialStatus: string }) {
   const [confirming, setConfirming] = useState<BulkAction | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-organizers', statusFilter],
-    queryFn: () =>
-      apiGet<{ organizers: AdminOrganizerRow[] }>(
-        `/api/admin/organizers${statusFilter === 'ALL' ? '' : `?status=${statusFilter}`}`
-      ),
+    queryKey: ['admin-organizers', statusFilter, q],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (statusFilter !== 'ALL') params.set('status', statusFilter)
+      if (q.trim()) params.set('q', q.trim())
+      const qs = params.toString()
+      return apiGet<OrganizersResponse>(`/api/admin/organizers${qs ? `?${qs}` : ''}`)
+    },
   })
 
   const organizers = data?.organizers ?? []
+  const counts = data?.counts ?? {}
   // Stale ids from a previous filter are ignored rather than acted on blindly.
   const selected = organizers.filter((o) => selection.ids.has(o.id))
 
@@ -89,7 +137,7 @@ export function AdminOrganizers({ initialStatus }: { initialStatus: string }) {
     if (rows.length === 0) return
     setRunning(action.key)
     const r = await mapLimit(rows, 5, (o) =>
-      apiPut(`/api/admin/organizers/${o.id}`, { status: action.key })
+      apiPut(`/api/admin/organizers/${o.id}`, { status: action.key }),
     )
     setRunning(null)
     setConfirming(null)
@@ -98,144 +146,184 @@ export function AdminOrganizers({ initialStatus }: { initialStatus: string }) {
     invalidate()
   }
 
-  function statusBadge(status: string) {
-    if (status === 'APPROVED') return <Badge>Approved</Badge>
-    if (status === 'REJECTED') return <Badge variant="destructive">Rejected</Badge>
-    return (
-      <Badge variant="outline" className="border-chart-5/60">
-        Pending
-      </Badge>
-    )
-  }
+  const filters: FilterOption[] = ORGANIZER_FILTERS.map((f) => ({
+    ...f,
+    count:
+      f.value === 'ALL' ? Object.values(counts).reduce((a, b) => a + b, 0) : (counts[f.value] ?? 0),
+  }))
 
   const allSelected = organizers.length > 0 && selected.length === organizers.length
+  const busy = running !== null
 
   return (
-    <section aria-labelledby="admin-organizers-heading" className="space-y-4">
-      <SectionHeading
-        id="admin-organizers-heading"
-        title="Organizers"
-        description={
-          isLoading
-            ? 'Loading applications…'
-            : `${organizers.length} account${organizers.length === 1 ? '' : 's'} — approve applications and revoke access.`
-        }
+    <div className="space-y-6">
+      <StatStrip
+        {...sectionProps(0, '')}
+        loading={isLoading}
+        items={[
+          {
+            label: 'Awaiting review',
+            value: counts.PENDING ?? 0,
+            tone: (counts.PENDING ?? 0) > 0 ? 'attention' : 'default',
+          },
+          { label: 'Approved', value: counts.APPROVED ?? 0 },
+          { label: 'Rejected', value: counts.REJECTED ?? 0 },
+          {
+            label: 'Events listed',
+            value: organizers.reduce((sum, o) => sum + o.eventCount, 0),
+          },
+        ]}
       />
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {ORGANIZER_FILTERS.map((f) => (
-          <FilterChip key={f.v} active={statusFilter === f.v} onClick={() => setStatusFilter(f.v)}>
-            {f.label}
-          </FilterChip>
-        ))}
-        {organizers.length > 0 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="ml-auto h-7 text-xs"
-            onClick={() => selection.setMany(organizers.map((o) => o.id), !allSelected)}
-          >
-            {allSelected ? 'Clear selection' : 'Select all'}
-          </Button>
-        )}
-      </div>
-
-      <BulkBar
-        selectedCount={selected.length}
-        actions={bulkActions}
-        running={running}
-        onClear={selection.clear}
-        onRun={(a) => (a.confirm ? setConfirming(a) : runBulk(a))}
-      />
-
-      {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-32 rounded-xl" />
-          ))}
-        </div>
-      ) : organizers.length === 0 ? (
-        <EmptyState
-          icon={ShieldCheck}
-          title={statusFilter === 'PENDING' ? 'No pending applications' : 'No organizers found'}
-          description="Organizer applications will appear here for approval."
+      <section aria-labelledby="admin-organizers-heading" {...sectionProps(1)}>
+        <SectionHeading
+          id="admin-organizers-heading"
+          title="Organizers"
+          description="Approve applications and revoke access. Rejecting keeps their data."
         />
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {organizers.map((o) => {
-            const isSelected = selection.ids.has(o.id)
-            const rowBusy =
-              running !== null || (reviewMutation.isPending && reviewMutation.variables?.id === o.id)
-            return (
-              <li
-                key={o.id}
-                className={cn(
-                  'rounded-2xl border bg-card p-4 transition-colors',
-                  o.status === 'PENDING' && 'border-chart-5/50 bg-chart-5/5',
-                  isSelected && 'ring-2 ring-primary/40',
-                )}
-              >
-                <div className="grid gap-3">
-                  <div className="flex items-start gap-3">
+
+        <ConsoleToolbar>
+          <FilterChips
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={filters}
+            visible={4}
+            label="Application status"
+          />
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Organization, name or email"
+            label="Search organizers"
+          />
+        </ConsoleToolbar>
+
+        <BulkBar
+          selectedCount={selected.length}
+          actions={bulkActions}
+          running={running}
+          onRun={(a) => (a.confirm ? setConfirming(a) : runBulk(a))}
+          onClear={selection.clear}
+        />
+
+        {isLoading ? (
+          <ConsoleSkeleton rows={5} cols={5} />
+        ) : organizers.length === 0 ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="No organizers here"
+            description={
+              search || statusFilter !== 'ALL'
+                ? 'Nothing matches this filter. Try clearing it.'
+                : 'Organizer applications arrive when someone signs up to sell tickets.'
+            }
+          />
+        ) : (
+          <>
+            <ConsoleTable columns={COLUMNS} caption="Organizer applications, newest first">
+              {organizers.map((o) => (
+                <ConsoleRow key={o.id} tone={o.status === 'PENDING' ? 'attention' : undefined}>
+                  <ConsoleCell label="Select" className="md:w-10">
                     <Checkbox
-                      checked={isSelected}
+                      checked={selection.ids.has(o.id)}
                       onCheckedChange={() => selection.toggle(o.id)}
                       aria-label={`Select ${o.organizationName}`}
-                      className="mt-1"
+                      disabled={busy}
                     />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold">{o.organizationName}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Applied {formatEventDate(o.createdAt)} · {o.eventCount} event
-                        {o.eventCount === 1 ? '' : 's'}
-                      </p>
-                    </div>
-                    {statusBadge(o.status)}
-                  </div>
-
-                  <div className="rounded-md bg-muted/40 p-2.5 text-sm">
-                    <p className="font-medium">{o.user.name}</p>
-                    <p className="text-xs text-muted-foreground">{o.user.email}</p>
-                    <p className="text-xs text-muted-foreground">{o.user.phone || 'No phone'}</p>
-                  </div>
-
-                  {o.status !== 'APPROVED' && (
-                    <div className="flex gap-2">
+                  </ConsoleCell>
+                  <ConsoleCell label="Organization">
+                    <RowIdentity
+                      icon={<Building2 className="size-4" />}
+                      title={o.organizationName}
+                      meta={`Applied ${formatEventDate(o.createdAt)}`}
+                      tone={o.status === 'APPROVED' ? 'default' : 'muted'}
+                    />
+                  </ConsoleCell>
+                  <ConsoleCell label="Contact">
+                    <span className="block truncate">{o.user.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {o.user.email}
+                    </span>
+                    {o.phone && (
+                      <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                        {o.phone}
+                      </span>
+                    )}
+                    <span className="mt-1 block">
+                      <AccountStatusBadge status={o.user.status} />
+                    </span>
+                  </ConsoleCell>
+                  <ConsoleCell label="Events" align="center">
+                    <span className="tabular-nums">{o.eventCount}</span>
+                  </ConsoleCell>
+                  <ConsoleCell label="Status">
+                    <OrganizerStatusBadge status={o.status} />
+                  </ConsoleCell>
+                  <ConsoleActions>
+                    {o.status !== 'APPROVED' && (
                       <Button
                         size="sm"
-                        className="flex-1 active:scale-[0.98]"
-                        disabled={rowBusy}
+                        className="h-8 active:scale-[0.98] motion-reduce:transform-none"
+                        disabled={busy || reviewMutation.isPending}
                         onClick={() => reviewMutation.mutate({ id: o.id, status: 'APPROVED' })}
                       >
-                        {rowBusy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
+                        {reviewMutation.isPending &&
+                        reviewMutation.variables?.id === o.id &&
+                        reviewMutation.variables?.status === 'APPROVED' ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <CheckCircle2 />
+                        )}
                         Approve
                       </Button>
-                      {o.status === 'PENDING' && (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          className="flex-1 active:scale-[0.98]"
-                          disabled={rowBusy}
-                          onClick={() => reviewMutation.mutate({ id: o.id, status: 'REJECTED' })}
-                        >
-                          <XCircle /> Reject
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+                    )}
+                    {o.status === 'PENDING' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={busy || reviewMutation.isPending}
+                        onClick={() => reviewMutation.mutate({ id: o.id, status: 'REJECTED' })}
+                      >
+                        <XCircle /> Reject
+                      </Button>
+                    )}
+                    {o.status === 'REJECTED' && (
+                      <span className="text-xs text-muted-foreground md:hidden">
+                        Rejected — approve to restore
+                      </span>
+                    )}
+                  </ConsoleActions>
+                </ConsoleRow>
+              ))}
+            </ConsoleTable>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() =>
+                  selection.setMany(
+                    organizers.map((o) => o.id),
+                    !allSelected,
+                  )
+                }
+              >
+                {allSelected ? 'Clear selection' : `Select all ${organizers.length}`}
+              </Button>
+              {data?.truncated && <TruncatedNote shown={organizers.length} noun="organizers" />}
+            </div>
+          </>
+        )}
+      </section>
 
       <ConfirmDialog
         action={confirming}
-        running={running !== null}
+        running={busy}
         onCancel={() => setConfirming(null)}
         onConfirm={() => confirming && runBulk(confirming)}
       />
-    </section>
+    </div>
   )
 }

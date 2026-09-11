@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   BarChart3,
   CalendarPlus,
+  ChevronRight,
   ExternalLink,
   Loader2,
   MoreHorizontal,
@@ -16,7 +17,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api'
-import { categoryEmoji, categoryLabel, formatEventDate } from '@/lib/format'
+import { categoryLabel, formatEventDate } from '@/lib/format'
 import { EVENT_STATUS_LABELS } from '@/lib/constants'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -52,7 +53,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import { EmptyState } from '@/components/app/empty-state'
 import { EventStatusBadge } from '@/components/dashboard/status-badges'
-import { FilterChips, Panel, SectionHeading, entrance } from '@/components/dashboard/primitives'
+import { CategoryIcon } from '@/components/app/category-icon'
+import {
+  FilterChips,
+  Meter,
+  Panel,
+  SectionHeading,
+  entrance,
+} from '@/components/dashboard/primitives'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
 import { cn } from '@/lib/utils'
 import { EventForm } from './event-form'
@@ -188,6 +196,114 @@ export function EventsManager({
     ...STATUSES.map((s) => ({ value: s, label: EVENT_STATUS_LABELS[s] ?? s, count: counts[s] ?? 0 })),
   ]
 
+  /**
+   * The per-row overflow menu.
+   *
+   * A render helper rather than a component, so the table and the small-screen
+   * card list share one copy of the lifecycle actions without threading eight
+   * mutation handlers through props.
+   */
+  function renderActions(e: EventListItem) {
+    const rowBusy = busyRow(e.id)
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 cursor-pointer"
+            aria-label={`Actions for ${e.title}`}
+            disabled={rowBusy}
+          >
+            {rowBusy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <MoreHorizontal className="size-4" />
+            )}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem
+            onSelect={() => {
+              setEditing(e)
+              setFormOpen(true)
+            }}
+          >
+            <Pencil /> Edit
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setAnalyticsEventId(e.id)}>
+            <BarChart3 /> Analytics
+          </DropdownMenuItem>
+          {(e.status === 'DRAFT' || e.status === 'REJECTED') && (
+            <DropdownMenuItem onSelect={() => submitMutation.mutate(e.id)}>
+              <Send /> Submit for approval
+            </DropdownMenuItem>
+          )}
+          {e.status === 'PUBLISHED' && (
+            <DropdownMenuItem onSelect={() => statusMutation.mutate({ id: e.id, status: 'ONGOING' })}>
+              <PlayCircle /> Mark ongoing
+            </DropdownMenuItem>
+          )}
+          {(e.status === 'PUBLISHED' || e.status === 'ONGOING') && (
+            <DropdownMenuItem
+              onSelect={() => statusMutation.mutate({ id: e.id, status: 'COMPLETED' })}
+            >
+              <ExternalLink /> Mark completed
+            </DropdownMenuItem>
+          )}
+          {e.status !== 'CANCELLED' && e.status !== 'COMPLETED' && (
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => setCancelTarget(e)}
+            >
+              <XCircle /> Cancel event
+            </DropdownMenuItem>
+          )}
+          {(e.status === 'PUBLISHED' || e.status === 'ONGOING') && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href={paths.event(e)}>
+                  <ExternalLink /> View public page
+                </Link>
+              </DropdownMenuItem>
+            </>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onSelect={() => setDeleteTarget(e)}
+          >
+            <Trash2 /> Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
+  /** The event's thumbnail, or its category mark when there is no banner. */
+  function renderThumb(e: EventListItem, className: string) {
+    return e.banner ? (
+      <img
+        src={e.banner}
+        alt=""
+        className={cn('shrink-0 rounded-md object-cover', className)}
+        loading="lazy"
+        decoding="async"
+      />
+    ) : (
+      <div
+        className={cn(
+          'flex shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary',
+          className,
+        )}
+        aria-hidden="true"
+      >
+        <CategoryIcon category={e.category} className="size-4" />
+      </div>
+    )
+  }
+
   return (
     <section aria-labelledby="organizer-events-heading" className="space-y-4">
       <div {...entrance(0)}>
@@ -244,10 +360,68 @@ export function EventsManager({
             }
           />
         ) : (
-          <Panel padded={false} className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <Table className="min-w-[860px]">
-                <caption className="sr-only">Your events with category, date, ticket sales, status and actions</caption>
+          <>
+            {/* ── small screens: cards ──
+                The table below needs 860px and used to scroll sideways to get
+                it, which is the one layout rule this dashboard was breaking.
+                Same data, stacked, with the row itself opening analytics. */}
+            <Panel padded={false} className="overflow-hidden lg:hidden">
+              <h3 className="sr-only">Your events</h3>
+              <ul className="divide-y divide-border/70">
+                {filtered.map((e) => {
+                  const sold = soldOf(e)
+                  const total = totalOf(e)
+                  const pct = total > 0 ? Math.min(100, Math.round((sold / total) * 100)) : 0
+                  return (
+                    <li key={e.id} className="flex items-center gap-1 pr-2">
+                      <Link
+                        href={paths.organizerEvent(e.id)}
+                        className="flex min-w-0 flex-1 items-center gap-3 rounded-xl p-4 transition-colors duration-200 hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                      >
+                        {renderThumb(e, 'size-11')}
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="truncate text-sm font-medium">{e.title}</span>
+                            <EventStatusBadge status={e.status} />
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground tabular-nums">
+                            {categoryLabel(e.category)} · {e.city} · {formatEventDate(e.startDate)}
+                          </span>
+                          {total > 0 && (
+                            <span className="mt-2 flex items-center gap-2">
+                              <Meter
+                                value={sold}
+                                max={total}
+                                label={`${sold} of ${total} tickets sold, ${pct}%`}
+                                className="w-16 shrink-0"
+                              />
+                              <span className="text-[11px] text-muted-foreground tabular-nums">
+                                {sold}/{total} · {pct}%
+                              </span>
+                            </span>
+                          )}
+                        </span>
+                        <ChevronRight
+                          className="size-4 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                      </Link>
+                      {renderActions(e)}
+                    </li>
+                  )
+                })}
+              </ul>
+            </Panel>
+
+            {/* ── large screens: the table ── */}
+            {/* Guard without a floor: no `min-w`, so the table never *forces*
+                a sideways scroll, but it degrades to one instead of breaking if
+                a long title and a wide badge ever collide. */}
+            <Panel padded={false} className="hidden overflow-x-auto lg:block">
+              <Table>
+                <caption className="sr-only">
+                  Your events with category, date, ticket sales, status and actions
+                </caption>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Event</TableHead>
@@ -263,34 +437,29 @@ export function EventsManager({
                     const sold = soldOf(e)
                     const total = totalOf(e)
                     const pct = total > 0 ? Math.min(100, Math.round((sold / total) * 100)) : 0
-                    const rowBusy = busyRow(e.id)
                     return (
                       <TableRow key={e.id} className="transition-colors">
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            {e.banner ? (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img
-                                src={e.banner}
-                                alt=""
-                                className="h-10 w-16 shrink-0 rounded-md object-cover"
-                                loading="lazy"
-                                decoding="async"
-                              />
-                            ) : (
-                              <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded-md bg-muted text-lg">
-                                <span aria-hidden="true">{categoryEmoji(e.category)}</span>
-                              </div>
-                            )}
+                            {renderThumb(e, 'h-10 w-16')}
                             <div className="min-w-0">
-                              <p className="max-w-[240px] truncate font-medium">{e.title}</p>
+                              {/* The row's own job is "how is this selling", so
+                                  the title opens analytics in one click rather
+                                  than two through the overflow menu. */}
+                              <Link
+                                href={paths.organizerEvent(e.id)}
+                                className="block max-w-[240px] truncate rounded font-medium underline-offset-4 transition-colors duration-200 hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                              >
+                                {e.title}
+                              </Link>
                               <p className="text-xs text-muted-foreground">{e.city}</p>
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="font-normal">
-                            <span aria-hidden="true">{categoryEmoji(e.category)}</span> {categoryLabel(e.category)}
+                          <Badge variant="outline" className="gap-1.5 font-normal">
+                            <CategoryIcon category={e.category} className="size-3" />
+                            {categoryLabel(e.category)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm whitespace-nowrap tabular-nums">
@@ -302,96 +471,25 @@ export function EventsManager({
                             <span className="text-muted-foreground">/{total || '—'}</span>
                           </p>
                           {total > 0 && (
-                            <div className="mt-1 h-1 w-20 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                              <div
-                                className={cn('h-full rounded-full', pct >= 90 ? 'bg-chart-5' : 'bg-primary')}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
+                            <Meter
+                              value={sold}
+                              max={total}
+                              label={`${sold} of ${total} tickets sold, ${pct}%`}
+                              className="mt-1.5 w-20"
+                            />
                           )}
                         </TableCell>
                         <TableCell>
                           <EventStatusBadge status={e.status} />
                         </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                aria-label={`Actions for ${e.title}`}
-                                disabled={rowBusy}
-                              >
-                                {rowBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
-                              <DropdownMenuItem
-                                onSelect={() => {
-                                  setEditing(e)
-                                  setFormOpen(true)
-                                }}
-                              >
-                                <Pencil /> Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => setAnalyticsEventId(e.id)}>
-                                <BarChart3 /> Analytics
-                              </DropdownMenuItem>
-                              {(e.status === 'DRAFT' || e.status === 'REJECTED') && (
-                                <DropdownMenuItem onSelect={() => submitMutation.mutate(e.id)}>
-                                  <Send /> Submit for approval
-                                </DropdownMenuItem>
-                              )}
-                              {e.status === 'PUBLISHED' && (
-                                <DropdownMenuItem
-                                  onSelect={() => statusMutation.mutate({ id: e.id, status: 'ONGOING' })}
-                                >
-                                  <PlayCircle /> Mark ongoing
-                                </DropdownMenuItem>
-                              )}
-                              {(e.status === 'PUBLISHED' || e.status === 'ONGOING') && (
-                                <DropdownMenuItem
-                                  onSelect={() => statusMutation.mutate({ id: e.id, status: 'COMPLETED' })}
-                                >
-                                  <ExternalLink /> Mark completed
-                                </DropdownMenuItem>
-                              )}
-                              {e.status !== 'CANCELLED' && e.status !== 'COMPLETED' && (
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  onSelect={() => setCancelTarget(e)}
-                                >
-                                  <XCircle /> Cancel event
-                                </DropdownMenuItem>
-                              )}
-                              {(e.status === 'PUBLISHED' || e.status === 'ONGOING') && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem asChild>
-                                    <Link href={paths.event(e)}>
-                                      <ExternalLink /> View public page
-                                    </Link>
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onSelect={() => setDeleteTarget(e)}
-                              >
-                                <Trash2 /> Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
+                        <TableCell className="text-right">{renderActions(e)}</TableCell>
                       </TableRow>
                     )
                   })}
                 </TableBody>
               </Table>
-            </div>
-          </Panel>
+            </Panel>
+          </>
         )}
       </div>
 

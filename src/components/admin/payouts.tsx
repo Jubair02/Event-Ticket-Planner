@@ -7,12 +7,10 @@ import { BanknoteArrowUp, CheckCircle2, Loader2, Send, XCircle } from 'lucide-re
 import { apiGet, apiPut } from '@/lib/api'
 import { formatEventDate, formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
-import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogContent,
@@ -24,15 +22,25 @@ import {
 import { EmptyState } from '@/components/app/empty-state'
 import {
   FilterChips,
-  HeroMetric,
-  MetricGroup,
-  Panel,
   SearchBox,
   SectionHeading,
-  entrance,
+  sectionProps,
   type FilterOption,
 } from '@/components/dashboard/primitives'
+import { PayoutStatusBadge } from '@/components/dashboard/status-badges'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
+import {
+  ActionConfirm,
+  ConsoleActions,
+  ConsoleCell,
+  ConsoleRow,
+  ConsoleSkeleton,
+  ConsoleTable,
+  ConsoleToolbar,
+  RowIdentity,
+  StatStrip,
+  TruncatedNote,
+} from './console'
 import { useDebounced } from './shared'
 
 interface PayoutRow {
@@ -75,13 +83,14 @@ const STATUS_FILTERS = [
   { value: 'CANCELLED', label: 'Cancelled' },
 ]
 
-const STATUS_TONE: Record<string, string> = {
-  PAID: 'border-primary/20 bg-primary/10 text-primary',
-  APPROVED: 'border-chart-2/20 bg-chart-2/10 text-chart-2',
-  REQUESTED: 'border-chart-5/20 bg-chart-5/10 text-chart-5',
-  REJECTED: 'border-destructive/20 bg-destructive/10 text-destructive',
-  CANCELLED: 'bg-muted text-muted-foreground',
-}
+const COLUMNS = [
+  { label: 'Payout' },
+  { label: 'Organizer' },
+  { label: 'Destination' },
+  { label: 'Amount', className: 'text-right' },
+  { label: 'Status' },
+  { label: 'Actions', srOnly: true, className: 'text-right' },
+]
 
 export function AdminPayouts({
   initialStatus,
@@ -98,6 +107,7 @@ export function AdminPayouts({
   const qc = useQueryClient()
   const [running, setRunning] = useState<string | null>(null)
   const [paying, setPaying] = useState<PayoutRow | null>(null)
+  const [rejecting, setRejecting] = useState<PayoutRow | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-payouts', status, debounced],
@@ -126,10 +136,15 @@ export function AdminPayouts({
           ? 'Payout marked paid and posted to the ledger'
           : vars.action === 'approve'
             ? 'Payout approved'
-            : 'Payout rejected'
+            : 'Payout rejected',
       )
       setPaying(null)
+      setRejecting(null)
       qc.invalidateQueries({ queryKey: ['admin-payouts'] })
+      // The platform's own balances move with a payout, so the overview's
+      // figures are stale the moment this succeeds.
+      qc.invalidateQueries({ queryKey: ['admin-stats'] })
+      qc.invalidateQueries({ queryKey: ['admin-payments'] })
     },
     onError: (e: Error) => toast.error(e.message),
     onSettled: () => setRunning(null),
@@ -148,113 +163,136 @@ export function AdminPayouts({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <HeroMetric
-          label="Committed, not yet transferred"
-          value={formatMinor(data?.outstandingMinor ?? 0)}
-          hint={`${counts.REQUESTED ?? 0} awaiting review · ${counts.APPROVED ?? 0} approved`}
-          loading={isLoading}
-          icon={BanknoteArrowUp}
-          {...entrance(0)}
-          className={cn('lg:col-span-2', entrance(0).className)}
-        />
-        <MetricGroup
-          title="Paid out"
-          loading={isLoading}
-          items={[
-            { label: 'Total transferred', value: formatMinor(data?.totalsMinor.PAID ?? 0) },
-            { label: 'Payouts paid', value: counts.PAID ?? 0 },
-            { label: 'Rejected', value: counts.REJECTED ?? 0 },
-          ]}
-          {...entrance(1)}
-        />
-      </div>
+      <StatStrip
+        {...sectionProps(0, '')}
+        loading={isLoading}
+        items={[
+          {
+            label: 'Awaiting review',
+            value: counts.REQUESTED ?? 0,
+            tone: (counts.REQUESTED ?? 0) > 0 ? 'attention' : 'default',
+          },
+          { label: 'Approved, unpaid', value: counts.APPROVED ?? 0 },
+          {
+            label: 'Committed',
+            value: formatMinor(data?.outstandingMinor ?? 0),
+            tone: (data?.outstandingMinor ?? 0) > 0 ? 'attention' : 'default',
+          },
+          { label: 'Transferred to date', value: formatMinor(data?.totalsMinor.PAID ?? 0) },
+        ]}
+      />
 
-      <section
-        aria-labelledby="payouts-heading"
-        {...entrance(2)}
-        className={cn('space-y-4', entrance(2).className)}
-      >
+      <section aria-labelledby="payouts-heading" {...sectionProps(1)}>
         <SectionHeading
           id="payouts-heading"
           title="Payout queue"
           description="Approving reserves the funds. Marking paid is what posts it to the ledger."
-        >
+        />
+
+        <ConsoleToolbar>
+          <FilterChips
+            value={status}
+            onChange={setStatus}
+            options={filters}
+            visible={6}
+            label="Payout status"
+          />
           <SearchBox
             value={search}
             onChange={setSearch}
             placeholder="Reference or organizer"
             label="Search payouts"
           />
-        </SectionHeading>
-
-        <FilterChips value={status} onChange={setStatus} options={filters} visible={4} label="Payout status" />
+        </ConsoleToolbar>
 
         {isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 w-full rounded-xl" />
-            ))}
-          </div>
+          <ConsoleSkeleton rows={5} cols={6} />
         ) : payouts.length === 0 ? (
           <EmptyState
             icon={BanknoteArrowUp}
             title="No payouts here"
             description={
               search || status !== 'ALL'
-                ? 'Nothing matches this filter.'
+                ? 'Nothing matches this filter. Try clearing it.'
                 : 'Organizers request payouts once their sales have cleared.'
             }
           />
         ) : (
-          <div className="space-y-2">
-            {payouts.map((p) => (
-              <Panel key={p.id} className="p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium">{p.reference}</p>
-                      <Badge variant="outline" className={STATUS_TONE[p.status] ?? ''}>
-                        {p.statusLabel}
-                      </Badge>
+          <>
+            <ConsoleTable columns={COLUMNS} caption="Payout queue">
+              {payouts.map((p) => {
+                const busy = running?.startsWith(`${p.id}:`) ?? false
+                return (
+                  <ConsoleRow key={p.id} tone={p.status === 'REQUESTED' ? 'attention' : undefined}>
+                    <ConsoleCell label="Payout">
+                      <RowIdentity
+                        icon={<BanknoteArrowUp className="size-4" />}
+                        title={p.reference}
+                        meta={
+                          <>
+                            {formatEventDate(p.createdAt)}
+                            {p.transferRef ? ` · ref ${p.transferRef}` : ''}
+                            {p.reviewedByName ? ` · by ${p.reviewedByName}` : ''}
+                          </>
+                        }
+                        tone={p.status === 'PAID' ? 'default' : 'muted'}
+                      />
+                    </ConsoleCell>
+                    <ConsoleCell label="Organizer">
+                      <span className="block truncate">
+                        {p.organizer?.organizationName ?? 'Unknown organizer'}
+                      </span>
+                      {p.organizer?.contactEmail && (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {p.organizer.contactEmail}
+                        </span>
+                      )}
                       {p.initiatedBy === 'AUTOMATIC' && (
-                        <Badge variant="secondary" className="text-xs">
+                        <Badge variant="secondary" className="mt-1 text-[10px]">
                           Automatic
                         </Badge>
                       )}
-                    </div>
-                    <p className="mt-1 text-sm">
-                      {p.organizer?.organizationName ?? 'Unknown organizer'}
-                      {p.organizer?.contactEmail ? (
-                        <span className="text-muted-foreground"> · {p.organizer.contactEmail}</span>
-                      ) : null}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {p.method
-                        ? `${p.method.typeLabel} ····${p.method.accountLast4} · ${p.method.accountName}`
-                        : 'No destination on file'}
-                      {p.method?.bankName ? ` · ${p.method.bankName}` : ''}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Requested {formatEventDate(p.createdAt)}
-                      {p.reviewedByName ? ` · reviewed by ${p.reviewedByName}` : ''}
-                      {p.transferRef ? ` · ref ${p.transferRef}` : ''}
-                    </p>
-                    {p.note && <p className="mt-1 text-xs italic text-muted-foreground">“{p.note}”</p>}
-                    {p.reviewNote && (
-                      <p className="mt-1 text-xs text-muted-foreground">{p.reviewNote}</p>
-                    )}
-                  </div>
-
-                  <div className="flex shrink-0 flex-col items-end gap-2">
-                    <p className="font-semibold tabular-nums">{formatMinor(p.amountMinor)}</p>
-                    <div className="flex gap-1.5">
+                    </ConsoleCell>
+                    <ConsoleCell label="Destination">
+                      {p.method ? (
+                        <>
+                          <span className="block truncate">
+                            {p.method.typeLabel} ····{p.method.accountLast4}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {p.method.accountName}
+                            {p.method.bankName ? ` · ${p.method.bankName}` : ''}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">No destination on file</span>
+                      )}
+                    </ConsoleCell>
+                    <ConsoleCell label="Amount" align="right">
+                      <span className="block font-semibold tabular-nums">
+                        {formatMinor(p.amountMinor)}
+                      </span>
+                      {p.note && (
+                        <span className="block truncate text-xs text-muted-foreground italic">
+                          “{p.note}”
+                        </span>
+                      )}
+                    </ConsoleCell>
+                    <ConsoleCell label="Status">
+                      <PayoutStatusBadge status={p.status} />
+                      {p.reviewNote && (
+                        <span className="mt-1 block truncate text-xs text-muted-foreground">
+                          {p.reviewNote}
+                        </span>
+                      )}
+                    </ConsoleCell>
+                    <ConsoleActions>
                       {p.status === 'REQUESTED' && (
                         <>
                           <Button
                             size="sm"
-                            className="h-8"
-                            disabled={running !== null}
+                            className="h-8 active:scale-[0.98] motion-reduce:transform-none"
+                            disabled={busy}
                             onClick={() => run(p.id, 'approve')}
                           >
                             {running === `${p.id}:approve` ? (
@@ -268,45 +306,44 @@ export function AdminPayouts({
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            disabled={running !== null}
-                            onClick={() => run(p.id, 'reject')}
+                            disabled={busy}
+                            onClick={() => setRejecting(p)}
                           >
-                            {running === `${p.id}:reject` ? (
-                              <Loader2 className="animate-spin" />
-                            ) : (
-                              <XCircle />
-                            )}
-                            Reject
+                            <XCircle /> Reject
                           </Button>
                         </>
                       )}
                       {p.status === 'APPROVED' && (
                         <>
-                          <Button size="sm" className="h-8" onClick={() => setPaying(p)}>
+                          <Button
+                            size="sm"
+                            className="h-8 active:scale-[0.98] motion-reduce:transform-none"
+                            disabled={busy}
+                            onClick={() => setPaying(p)}
+                          >
                             <Send /> Mark paid
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            disabled={running !== null}
-                            onClick={() => run(p.id, 'reject')}
+                            disabled={busy}
+                            onClick={() => setRejecting(p)}
                           >
-                            {running === `${p.id}:reject` ? (
-                              <Loader2 className="animate-spin" />
-                            ) : (
-                              <XCircle />
-                            )}
-                            Reject
+                            <XCircle /> Reject
                           </Button>
                         </>
                       )}
-                    </div>
-                  </div>
-                </div>
-              </Panel>
-            ))}
-          </div>
+                      {p.status !== 'REQUESTED' && p.status !== 'APPROVED' && (
+                        <span className="text-xs text-muted-foreground md:hidden">No action</span>
+                      )}
+                    </ConsoleActions>
+                  </ConsoleRow>
+                )
+              })}
+            </ConsoleTable>
+            {data?.truncated && <TruncatedNote shown={payouts.length} noun="payouts" />}
+          </>
         )}
       </section>
 
@@ -314,9 +351,25 @@ export function AdminPayouts({
         payout={paying}
         pending={decide.isPending}
         onCancel={() => setPaying(null)}
-        onConfirm={(transferRef, note) =>
-          paying && decide.mutate({ id: paying.id, action: 'mark_paid', transferRef, note })
-        }
+        onConfirm={(transferRef, note) => {
+          if (!paying) return
+          setRunning(`${paying.id}:mark_paid`)
+          decide.mutate({ id: paying.id, action: 'mark_paid', transferRef, note })
+        }}
+      />
+
+      <ActionConfirm
+        open={rejecting !== null}
+        title={`Reject ${rejecting?.reference ?? ''}?`}
+        body="The organizer is told it was rejected and the reserved funds return to their available balance. They can request again."
+        cta="Reject payout"
+        pending={decide.isPending}
+        onCancel={() => setRejecting(null)}
+        onConfirm={() => {
+          if (!rejecting) return
+          setRunning(`${rejecting.id}:reject`)
+          decide.mutate({ id: rejecting.id, action: 'reject' })
+        }}
       />
     </div>
   )

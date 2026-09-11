@@ -31,6 +31,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { EmptyState } from '@/components/app/empty-state'
 import {
   HeroMetric,
@@ -99,12 +109,27 @@ interface WalletResponse {
   policy: { holdDays: number; minPayoutMinor: number }
 }
 
+/**
+ * Payout status tones.
+ *
+ * The colour rides the **border and the tint, never the label**. Setting the
+ * text to its own tone is what the previous version did, and the two most
+ * common statuses failed WCAG badly against their own backgrounds:
+ * `text-chart-5` on `bg-chart-5/10` measures **1.92:1** and `text-chart-2` on
+ * `bg-chart-2/10` measures **2.97:1**, against a 4.5:1 floor for 12px text.
+ * `text-foreground` on the same tints measures ~18:1, and this is already the
+ * convention `EventStatusBadge` uses for its "needs attention" state.
+ *
+ * A stronger border (`/50` rather than `/20`) keeps the statuses as easy to
+ * tell apart as they were, and the label is always spelled out, so the tone is
+ * never the only signal.
+ */
 const STATUS_TONE: Record<string, string> = {
-  PAID: 'bg-primary/10 text-primary border-primary/20',
-  APPROVED: 'bg-chart-2/10 text-chart-2 border-chart-2/20',
-  REQUESTED: 'bg-chart-5/10 text-chart-5 border-chart-5/20',
-  REJECTED: 'bg-destructive/10 text-destructive border-destructive/20',
-  CANCELLED: 'bg-muted text-muted-foreground',
+  PAID: 'border-primary/50 bg-primary/10 text-foreground',
+  APPROVED: 'border-chart-2/50 bg-chart-2/10 text-foreground',
+  REQUESTED: 'border-chart-5/60 bg-chart-5/10 text-foreground',
+  REJECTED: 'border-destructive/50 bg-destructive/10 text-foreground',
+  CANCELLED: 'border-border bg-muted text-muted-foreground',
 }
 
 export function OrganizerPayouts() {
@@ -215,9 +240,64 @@ export function OrganizerPayouts() {
             description="Request one once your sales have cleared their hold."
           />
         ) : (
-          <Panel padded={false} className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px] text-sm">
+          <>
+            {/* ── small screens ──
+                The table needed 680px and scrolled sideways to get it. Money
+                and status lead here, because that is what a request is checked
+                for; the reference drops to a secondary line. */}
+            <Panel padded={false} className="overflow-hidden lg:hidden">
+              <h3 className="sr-only">Your payout requests</h3>
+              <ul className="divide-y divide-border/70">
+                {payouts.map((p) => (
+                  <li key={p.id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-base font-semibold tabular-nums">
+                          {formatMinor(p.amountMinor)}
+                        </p>
+                        <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                          {p.reference}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={cn('shrink-0', STATUS_TONE[p.status])}>
+                        {p.statusLabel}
+                      </Badge>
+                    </div>
+
+                    <dl className="mt-2.5 space-y-1 text-xs">
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Destination</dt>
+                        <dd className="truncate">
+                          {p.method
+                            ? `${p.method.typeLabel} ····${p.method.accountLast4}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Requested</dt>
+                        <dd className="tabular-nums">{formatEventDate(p.createdAt)}</dd>
+                      </div>
+                      {p.transferRef && (
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-muted-foreground">Transfer ref</dt>
+                          <dd className="truncate font-mono">{p.transferRef}</dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    {p.reviewNote && (
+                      <p className="mt-2 rounded-lg bg-muted/50 p-2 text-xs text-muted-foreground">
+                        {p.reviewNote}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+
+            {/* ── large screens ── */}
+            <Panel padded={false} className="hidden overflow-x-auto lg:block">
+              <table className="w-full text-sm">
                 <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground uppercase">
                   <tr>
                     <th className="px-4 py-3 font-medium">Reference</th>
@@ -259,8 +339,8 @@ export function OrganizerPayouts() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </Panel>
+            </Panel>
+          </>
         )}
       </section>
 
@@ -291,10 +371,13 @@ export function OrganizerPayouts() {
                       : ''}
                   </p>
                 </div>
+                {/* The sign carries the direction, so the colour is
+                    reinforcement rather than the only signal. */}
                 <span
-                  className={`shrink-0 font-semibold tabular-nums ${
-                    e.amountMinor < 0 ? 'text-destructive' : 'text-primary'
-                  }`}
+                  className={cn(
+                    'shrink-0 font-semibold tabular-nums',
+                    e.amountMinor < 0 ? 'text-destructive' : 'text-primary',
+                  )}
                 >
                   {e.amountMinor > 0 ? '+' : ''}
                   {formatMinor(e.amountMinor)}
@@ -564,6 +647,8 @@ function AddMethodDialog({ onDone }: { onDone: () => void }) {
 }
 
 function MethodCard({ method, onDone }: { method: MethodRow; onDone: () => void }) {
+  const [confirmRemove, setConfirmRemove] = useState(false)
+
   const setDefault = useMutation({
     mutationFn: () => apiPatch(`/api/organizer/payout-methods/${method.id}`, { isDefault: true }),
     onSuccess: () => {
@@ -577,9 +662,13 @@ function MethodCard({ method, onDone }: { method: MethodRow; onDone: () => void 
     mutationFn: () => apiDelete(`/api/organizer/payout-methods/${method.id}`),
     onSuccess: () => {
       toast.success('Destination removed')
+      setConfirmRemove(false)
       onDone()
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      toast.error(e.message)
+      setConfirmRemove(false)
+    },
   })
 
   return (
@@ -608,9 +697,9 @@ function MethodCard({ method, onDone }: { method: MethodRow; onDone: () => void 
           <Button
             size="icon"
             variant="ghost"
-            className="size-8"
-            title="Make default"
-            aria-label="Make default"
+            className="size-8 cursor-pointer"
+            title={`Make ${method.typeLabel} ····${method.accountLast4} the default`}
+            aria-label={`Make ${method.typeLabel} ending ${method.accountLast4} the default destination`}
             onClick={() => setDefault.mutate()}
             disabled={setDefault.isPending}
           >
@@ -620,15 +709,43 @@ function MethodCard({ method, onDone }: { method: MethodRow; onDone: () => void 
         <Button
           size="icon"
           variant="ghost"
-          className="size-8 text-destructive hover:text-destructive"
+          className="size-8 cursor-pointer text-destructive hover:text-destructive"
           title="Remove"
-          aria-label="Remove destination"
-          onClick={() => remove.mutate()}
+          aria-label={`Remove ${method.typeLabel} ending ${method.accountLast4}`}
+          onClick={() => setConfirmRemove(true)}
           disabled={remove.isPending}
         >
           {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
         </Button>
       </div>
+
+      {/* Removing a destination was a single unguarded click, unlike every
+          other destructive action in the dashboard. Where the money goes is
+          not the place to be the exception. */}
+      <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this payout destination?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {method.typeLabel} ····{method.accountLast4} ({method.accountName}) will no longer
+              be available for payouts. Requests already sent for review are unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="cursor-pointer">Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="cursor-pointer bg-destructive text-white hover:bg-destructive/90"
+              onClick={(ev) => {
+                ev.preventDefault()
+                remove.mutate()
+              }}
+            >
+              {remove.isPending && <Loader2 className="animate-spin" />}
+              Remove destination
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Panel>
   )
 }

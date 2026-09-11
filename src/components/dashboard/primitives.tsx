@@ -1,7 +1,7 @@
 'use client'
 
 import type { CSSProperties } from 'react'
-import { Search } from 'lucide-react'
+import { Minus, Search, TrendingDown, TrendingUp } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,6 +43,20 @@ export function entrance(index = 0): { className: string; style: CSSProperties }
   }
 }
 
+/**
+ * Props for a dashboard section: its own classes merged with the entrance
+ * animation.
+ *
+ * Every section previously had to write
+ * `{...entrance(2)} className={cn('space-y-4', entrance(2).className)}` —
+ * calling `entrance` twice and relying on prop order, which three pages got
+ * wrong by spreading after `className` and silently losing their own classes.
+ */
+export function sectionProps(index: number, className = 'space-y-4') {
+  const e = entrance(index)
+  return { className: cn(className, e.className), style: e.style }
+}
+
 // ---------------------------------------------------------------- headings
 
 export function SectionHeading({
@@ -81,6 +95,97 @@ export function Eyebrow({ className, ...props }: React.ComponentProps<'p'>) {
 
 // ---------------------------------------------------------------- metrics
 
+/**
+ * Signed change against a named baseline.
+ *
+ * Colour alone never carries the direction — the arrow does too, so the chip
+ * survives colourblindness and greyscale print. `goodWhenUp` exists because
+ * "up" is not always good: more refunds is a worse number, not a better one.
+ */
+export function DeltaChip({
+  ratio,
+  since,
+  goodWhenUp = true,
+  className,
+}: {
+  /** Signed fraction, e.g. 0.12 for +12%. */
+  ratio: number
+  /** What it is measured against, e.g. "vs previous event". */
+  since: string
+  goodWhenUp?: boolean
+  className?: string
+}) {
+  const up = ratio >= 0
+  const good = up === goodWhenUp
+  const Arrow = up ? TrendingUp : TrendingDown
+  // Rounded first, so a +0.4% change reads as "no change" rather than "+0%",
+  // which looks like a bug.
+  const pct = Math.round(Math.abs(ratio) * 100)
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
+        pct === 0
+          ? 'bg-muted text-muted-foreground'
+          : good
+            ? 'bg-primary/10 text-primary'
+            : 'bg-destructive/10 text-destructive',
+        className,
+      )}
+    >
+      {pct === 0 ? (
+        <Minus className="size-3" aria-hidden="true" />
+      ) : (
+        <Arrow className="size-3" aria-hidden="true" />
+      )}
+      {pct === 0 ? 'No change' : `${up ? '+' : '−'}${pct}%`}
+      <span className="font-normal opacity-75">{since}</span>
+    </span>
+  )
+}
+
+/**
+ * A single ratio against a limit.
+ *
+ * The unfilled track is a lighter step of the fill's own ramp rather than a
+ * neutral grey, so the bar reads as one scale end to end instead of "coloured
+ * part plus empty part". Severity rides the fill: primary until the value is
+ * high enough to matter, then the amber `chart-5` at the same 80% threshold
+ * `event-card` and `event-detail` already use for "almost gone".
+ */
+export function Meter({
+  value,
+  max,
+  label,
+  hot = 0.8,
+  className,
+}: {
+  value: number
+  max: number
+  /** Sentence describing the ratio, for assistive tech. */
+  label: string
+  /** Fraction at which the fill switches to the warning tone. */
+  hot?: number
+  className?: string
+}) {
+  const ratio = max > 0 ? Math.min(value / max, 1) : 0
+  return (
+    <div
+      className={cn('h-1.5 overflow-hidden rounded-full bg-primary/12', className)}
+      role="img"
+      aria-label={label}
+    >
+      <div
+        className={cn(
+          'h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none',
+          ratio >= hot ? 'bg-chart-5' : 'bg-primary',
+        )}
+        style={{ width: `${ratio * 100}%` }}
+      />
+    </div>
+  )
+}
+
 /** The one number worth reading at a glance — given the size to match. */
 export function HeroMetric({
   label,
@@ -88,6 +193,7 @@ export function HeroMetric({
   hint,
   loading,
   icon: Icon,
+  delta,
   children,
   className,
 }: {
@@ -96,6 +202,8 @@ export function HeroMetric({
   hint?: string
   loading?: boolean
   icon?: LucideIcon
+  /** Rendered beside the value — a `DeltaChip`, or nothing when there is no honest baseline. */
+  delta?: React.ReactNode
   children?: React.ReactNode
   className?: string
 }) {
@@ -114,9 +222,15 @@ export function HeroMetric({
         )}
       </div>
       {loading ? (
-        <Skeleton className="relative mt-3 h-10 w-44" />
+        <Skeleton className="relative mt-3 h-11 w-44" />
       ) : (
-        <p className="relative mt-3 text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl">{value}</p>
+        <div className="relative mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
+          {/* Proportional figures, not `tabular-nums`: equal-width digits are for
+              columns that must align, and at display size they make a number
+              like 121 look loosely spaced. */}
+          <p className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">{value}</p>
+          {delta}
+        </div>
       )}
       {hint && <p className="relative mt-1.5 text-xs text-muted-foreground tabular-nums">{hint}</p>}
       {children}
@@ -184,6 +298,12 @@ export interface FilterOption {
   value: string
   label: string
   count?: number
+  /**
+   * Optional swatch drawn before the label. It ties a chip to the chart
+   * segment of the same colour, so a distribution chart above the row never
+   * carries its meaning by colour alone — the chips are its legend.
+   */
+  dotClass?: string
 }
 
 /**
@@ -210,6 +330,15 @@ export function FilterChips({
 
   const chip = (o: FilterOption) => (
     <FilterChip key={o.value} active={value === o.value} onClick={() => onChange(o.value)}>
+      {o.dotClass && (
+        <span
+          // The active chip is filled with `primary`, which would swallow a
+          // `bg-primary` swatch whole. `bg-current` keeps the dot visible there
+          // without changing the chip's width as it is selected.
+          className={cn('size-1.5 shrink-0 rounded-full', value === o.value ? 'bg-current opacity-60' : o.dotClass)}
+          aria-hidden="true"
+        />
+      )}
       {o.label}
       {typeof o.count === 'number' && (
         <span className={cn('tabular-nums', value === o.value ? 'opacity-80' : 'opacity-70')}>{o.count}</span>
@@ -232,6 +361,9 @@ export function FilterChips({
           <SelectContent align="start">
             {overflow.map((o) => (
               <SelectItem key={o.value} value={o.value}>
+                {o.dotClass && (
+                  <span className={cn('size-1.5 shrink-0 rounded-full', o.dotClass)} aria-hidden="true" />
+                )}
                 {o.label}
                 {typeof o.count === 'number' && (
                   <span className="ml-1.5 text-muted-foreground tabular-nums">{o.count}</span>

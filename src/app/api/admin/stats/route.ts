@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthError, requireRole } from '@/lib/auth'
 import { fromDbMinor } from '@/lib/money'
+import { accountBalanceMinor } from '@/lib/ledger'
 
 /** GET /api/admin/stats — platform-wide overview for SUPER_ADMIN. */
 export async function GET() {
@@ -22,6 +23,13 @@ export async function GET() {
       revenueAgg,
       ticketsSoldAgg,
       totalCheckIns,
+      pendingRefunds,
+      failedRefunds,
+      pendingPayouts,
+      gatewayClearingMinor,
+      cashMinor,
+      platformRevenueMinor,
+      organizerPayableMinor,
     ] = await Promise.all([
       db.user.count(),
       db.user.count({ where: { role: 'CUSTOMER' } }),
@@ -36,6 +44,15 @@ export async function GET() {
       db.order.aggregate({ _sum: { totalMinor: true }, where: { paymentStatus: 'PAID' } }),
       db.ticketType.aggregate({ _sum: { soldQuantity: true } }),
       db.ticket.count({ where: { status: 'CHECKED_IN' } }),
+      db.refund.count({ where: { status: { in: ['REQUESTED', 'APPROVED'] } } }),
+      db.refund.count({ where: { status: 'FAILED' } }),
+      db.payout.count({ where: { status: { in: ['REQUESTED', 'APPROVED'] } } }),
+      // Straight from the ledger rather than re-summed from orders, so the
+      // overview and the books cannot disagree.
+      accountBalanceMinor(db, 'GATEWAY_CLEARING'),
+      accountBalanceMinor(db, 'CASH'),
+      accountBalanceMinor(db, 'PLATFORM_REVENUE'),
+      accountBalanceMinor(db, 'ORGANIZER_PAYABLE'),
     ])
 
     return NextResponse.json({
@@ -53,6 +70,15 @@ export async function GET() {
         totalRevenueMinor: fromDbMinor(revenueAgg._sum.totalMinor),
         totalTicketsSold: ticketsSoldAgg._sum.soldQuantity ?? 0,
         totalCheckIns,
+        pendingRefunds,
+        failedRefunds,
+        pendingPayouts,
+        ledger: {
+          gatewayClearingMinor,
+          cashMinor,
+          platformRevenueMinor,
+          organizerPayableMinor,
+        },
       },
     })
   } catch (e) {

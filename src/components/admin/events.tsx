@@ -6,22 +6,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, Eye, Loader2, MoreHorizontal, Star, Ticket, XCircle } from 'lucide-react'
 import { apiGet, apiPut } from '@/lib/api'
-import { categoryEmoji, formatEventDate } from '@/lib/format'
+import { formatEventDate, formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 import type { EventListItem } from '@/lib/types'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,15 +20,28 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/app/empty-state'
+import { CategoryIcon } from '@/components/app/category-icon'
 import { EventStatusBadge } from '@/components/dashboard/status-badges'
 import {
   FilterChips,
+  Meter,
   SearchBox,
   SectionHeading,
-  entrance,
-  panelClass,
+  sectionProps,
+  type FilterOption,
 } from '@/components/dashboard/primitives'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
+import {
+  ConsoleActions,
+  ConsoleCell,
+  ConsoleRow,
+  ConsoleSkeleton,
+  ConsoleTable,
+  ConsoleToolbar,
+  RowIdentity,
+  StatStrip,
+  TruncatedNote,
+} from './console'
 import {
   BulkBar,
   ConfirmDialog,
@@ -49,18 +52,22 @@ import {
   type BulkAction,
 } from './shared'
 
-// ============================= Events =============================
+interface EventsResponse {
+  events: EventListItem[]
+  counts: Record<string, number>
+  truncated: boolean
+}
 
 const EVENT_FILTERS = [
-  { v: 'ALL', label: 'All' },
-  { v: 'PENDING_APPROVAL', label: 'Pending' },
-  { v: 'PUBLISHED', label: 'Published' },
-  { v: 'SUSPENDED', label: 'Suspended' },
-  { v: 'REJECTED', label: 'Rejected' },
-  { v: 'DRAFT', label: 'Draft' },
-  { v: 'ONGOING', label: 'Ongoing' },
-  { v: 'COMPLETED', label: 'Completed' },
-  { v: 'CANCELLED', label: 'Cancelled' },
+  { value: 'ALL', label: 'All' },
+  { value: 'PENDING_APPROVAL', label: 'Pending' },
+  { value: 'PUBLISHED', label: 'Published' },
+  { value: 'ONGOING', label: 'Ongoing' },
+  { value: 'SUSPENDED', label: 'Suspended' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
 ]
 
 /**
@@ -83,6 +90,20 @@ const EVENT_PAST_TENSE: Record<string, string> = {
   suspend: 'suspended',
   feature: 'featured',
 }
+
+const COLUMNS = [
+  { label: 'Select', srOnly: true, className: 'w-10' },
+  { label: 'Event' },
+  { label: 'Organizer' },
+  { label: 'Sold' },
+  { label: 'Status' },
+  { label: 'Actions', srOnly: true, className: 'text-right' },
+]
+
+const sold = (e: EventListItem) => (e.ticketTypes ?? []).reduce((s, t) => s + t.soldQuantity, 0)
+const capacity = (e: EventListItem) => (e.ticketTypes ?? []).reduce((s, t) => s + t.totalQuantity, 0)
+const grossMinor = (e: EventListItem) =>
+  (e.ticketTypes ?? []).reduce((s, t) => s + t.priceMinor * t.soldQuantity, 0)
 
 export function AdminEvents({
   initialStatus,
@@ -111,11 +132,12 @@ export function AdminEvents({
       if (statusFilter !== 'ALL') params.set('status', statusFilter)
       if (q.trim()) params.set('q', q.trim())
       const qs = params.toString()
-      return apiGet<{ events: EventListItem[] }>(`/api/admin/events${qs ? `?${qs}` : ''}`)
+      return apiGet<EventsResponse>(`/api/admin/events${qs ? `?${qs}` : ''}`)
     },
   })
 
   const events = data?.events ?? []
+  const counts = data?.counts ?? {}
   const selected = events.filter((e) => selection.ids.has(e.id))
 
   function invalidate() {
@@ -177,7 +199,9 @@ export function AdminEvents({
     const rows = eligible(action.key)
     if (rows.length === 0) return
     setRunning(action.key)
-    const r = await mapLimit(rows, 5, (e) => apiPut(`/api/admin/events/${e.id}`, { action: action.key }))
+    const r = await mapLimit(rows, 5, (e) =>
+      apiPut(`/api/admin/events/${e.id}`, { action: action.key }),
+    )
     setRunning(null)
     setConfirming(null)
     selection.clear()
@@ -185,212 +209,253 @@ export function AdminEvents({
     invalidate()
   }
 
+  const filters: FilterOption[] = EVENT_FILTERS.map((f) => ({
+    ...f,
+    count:
+      f.value === 'ALL' ? Object.values(counts).reduce((a, b) => a + b, 0) : (counts[f.value] ?? 0),
+  }))
+
   const allSelected = events.length > 0 && selected.length === events.length
   const busy = running !== null
 
   return (
-    <section aria-labelledby="admin-events-heading" className="space-y-4">
-      <SectionHeading
-        id="admin-events-heading"
-        title="Events"
-        description={
-          isLoading
-            ? 'Loading events…'
-            : `${events.length} event${events.length === 1 ? '' : 's'} — approve submissions, suspend, and feature.`
-        }
-      >
-        <SearchBox value={search} onChange={setSearch} placeholder="Search events…" label="Search events" />
-      </SectionHeading>
-
-      <FilterChips
-        value={statusFilter}
-        onChange={setStatusFilter}
-        options={EVENT_FILTERS.map((f) => ({ value: f.v, label: f.label }))}
-        visible={4}
-        label="Event status"
+    <div className="space-y-6">
+      <StatStrip
+        {...sectionProps(0, '')}
+        loading={isLoading}
+        items={[
+          {
+            label: 'Awaiting approval',
+            value: counts.PENDING_APPROVAL ?? 0,
+            tone: (counts.PENDING_APPROVAL ?? 0) > 0 ? 'attention' : 'default',
+          },
+          { label: 'Published', value: counts.PUBLISHED ?? 0 },
+          { label: 'Live now', value: counts.ONGOING ?? 0 },
+          {
+            label: 'Suspended',
+            value: counts.SUSPENDED ?? 0,
+            tone: (counts.SUSPENDED ?? 0) > 0 ? 'danger' : 'default',
+          },
+        ]}
       />
 
-      <BulkBar
-        selectedCount={selected.length}
-        actions={bulkActions}
-        running={running}
-        onClear={selection.clear}
-        onRun={(a) => (a.confirm ? setConfirming(a) : runBulk(a))}
-      />
+      <section aria-labelledby="admin-events-heading" {...sectionProps(1)}>
+        <SectionHeading
+          id="admin-events-heading"
+          title="Events"
+          description="Approve submissions, suspend what breaks the rules, and feature the best."
+        />
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-lg" />
-          ))}
-        </div>
-      ) : events.length === 0 ? (
-        <EmptyState icon={Ticket} title="No events found" description="Try a different filter or search term." />
-      ) : (
-        <div className={cn(panelClass, 'overflow-x-auto')}>
-          <Table className="min-w-[860px]">
-            <caption className="sr-only">
-              All platform events with organizer, date, status and moderation actions
-            </caption>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={allSelected}
-                    onCheckedChange={(c) => selection.setMany(events.map((e) => e.id), c === true)}
-                    aria-label="Select all events"
-                  />
-                </TableHead>
-                <TableHead>Event</TableHead>
-                <TableHead>Organizer</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-center">Featured</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <ConsoleToolbar>
+          <FilterChips
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={filters}
+            visible={5}
+            label="Event status"
+          />
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Event title"
+            label="Search events"
+          />
+        </ConsoleToolbar>
+
+        <BulkBar
+          selectedCount={selected.length}
+          actions={bulkActions}
+          running={running}
+          onRun={(a) => (a.confirm ? setConfirming(a) : runBulk(a))}
+          onClear={selection.clear}
+        />
+
+        {isLoading ? (
+          <ConsoleSkeleton rows={6} cols={5} />
+        ) : events.length === 0 ? (
+          <EmptyState
+            icon={Ticket}
+            title="No events here"
+            description={
+              search || statusFilter !== 'ALL'
+                ? 'Nothing matches this filter. Try clearing it.'
+                : 'Events appear here as organizers submit them.'
+            }
+          />
+        ) : (
+          <>
+            <ConsoleTable columns={COLUMNS} caption="All events, newest first">
               {events.map((e) => {
-                const isSelected = selection.ids.has(e.id)
-                const rowBusy =
-                  busy || (actionMutation.isPending && actionMutation.variables?.id === e.id)
+                const cap = capacity(e)
+                const s = sold(e)
+                const acting = actionMutation.isPending && actionMutation.variables?.id === e.id
                 return (
-                  <TableRow
+                  <ConsoleRow
                     key={e.id}
-                    data-state={isSelected ? 'selected' : undefined}
-                    className={cn(e.status === 'PENDING_APPROVAL' && !isSelected && 'bg-chart-5/10')}
+                    tone={
+                      e.status === 'PENDING_APPROVAL'
+                        ? 'attention'
+                        : e.status === 'SUSPENDED' || e.status === 'CANCELLED'
+                          ? 'danger'
+                          : undefined
+                    }
                   >
-                    <TableCell>
+                    <ConsoleCell label="Select" className="md:w-10">
                       <Checkbox
-                        checked={isSelected}
+                        checked={selection.ids.has(e.id)}
                         onCheckedChange={() => selection.toggle(e.id)}
                         aria-label={`Select ${e.title}`}
+                        disabled={busy}
                       />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        {e.banner ? (
-                          <img
-                            src={e.banner}
-                            alt={`${e.title} banner`}
-                            className="h-10 w-16 shrink-0 rounded object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-muted text-lg">
-                            {categoryEmoji(e.category)}
-                          </div>
+                    </ConsoleCell>
+                    <ConsoleCell label="Event">
+                      <RowIdentity
+                        icon={<CategoryIcon category={e.category} className="size-4" />}
+                        title={
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate">{e.title}</span>
+                            {e.featured && (
+                              <Star
+                                className="size-3.5 shrink-0 fill-chart-5 text-chart-5"
+                                aria-label="Featured"
+                              />
+                            )}
+                          </span>
+                        }
+                        href={paths.event(e)}
+                        meta={`${formatEventDate(e.startDate)} · ${e.city}`}
+                        tone={
+                          e.status === 'PUBLISHED' || e.status === 'ONGOING' ? 'default' : 'muted'
+                        }
+                      />
+                    </ConsoleCell>
+                    <ConsoleCell label="Organizer">
+                      <span className="block truncate">{e.organizer.organizationName}</span>
+                      {e.organizer.user?.name && (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {e.organizer.user.name}
+                        </span>
+                      )}
+                    </ConsoleCell>
+                    <ConsoleCell label="Sold">
+                      <span className="block text-xs tabular-nums">
+                        {s}
+                        <span className="text-muted-foreground">/{cap}</span>
+                        {s > 0 && (
+                          <span className="text-muted-foreground">
+                            {' '}
+                            · {formatMinor(grossMinor(e))}
+                          </span>
                         )}
-                        <div className="min-w-0">
-                          <p className="max-w-[220px] truncate font-medium">{e.title}</p>
-                          <p className="text-xs text-muted-foreground">{e.city}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <p className="max-w-[180px] truncate text-sm font-medium">
-                        {e.organizer?.organizationName ?? '—'}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{e.organizer?.user?.name ?? ''}</p>
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{formatEventDate(e.startDate)}</TableCell>
-                    <TableCell>
+                      </span>
+                      <Meter
+                        className="mt-1.5 md:w-32"
+                        value={s}
+                        max={cap}
+                        label={`${e.title}: ${s} of ${cap} tickets sold`}
+                      />
+                    </ConsoleCell>
+                    <ConsoleCell label="Status">
                       <EventStatusBadge status={e.status} />
-                    </TableCell>
-                    <TableCell className="text-center">
+                    </ConsoleCell>
+                    <ConsoleActions>
                       <Button
-                        variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
-                        disabled={rowBusy}
+                        variant="ghost"
+                        className="size-8"
                         aria-label={e.featured ? `Unfeature ${e.title}` : `Feature ${e.title}`}
-                        aria-pressed={e.featured}
+                        title={e.featured ? 'Unfeature' : 'Feature on the homepage'}
+                        disabled={busy || acting}
                         onClick={() =>
-                          actionMutation.mutate({ id: e.id, action: e.featured ? 'unfeature' : 'feature' })
+                          actionMutation.mutate({
+                            id: e.id,
+                            action: e.featured ? 'unfeature' : 'feature',
+                          })
                         }
                       >
-                        <Star
-                          className={cn(
-                            'h-4 w-4 transition-colors',
-                            e.featured ? 'fill-chart-5 text-chart-5' : 'text-muted-foreground',
-                          )}
-                        />
+                        <Star className={cn('size-4', e.featured && 'fill-chart-5 text-chart-5')} />
                       </Button>
-                    </TableCell>
-                    <TableCell className="text-right">
+
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
-                            variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            variant="outline"
+                            className="size-8"
                             aria-label={`Actions for ${e.title}`}
+                            disabled={busy || acting}
                           >
-                            {rowBusy ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                            {acting ? (
+                              <Loader2 className="size-4 animate-spin" />
                             ) : (
-                              <MoreHorizontal className="h-4 w-4" />
+                              <MoreHorizontal className="size-4" />
                             )}
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          {e.status === 'PENDING_APPROVAL' && (
-                            <>
-                              <DropdownMenuItem
-                                onSelect={() => actionMutation.mutate({ id: e.id, action: 'approve' })}
-                              >
-                                <CheckCircle2 /> Approve
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onSelect={() => actionMutation.mutate({ id: e.id, action: 'reject' })}
-                              >
-                                <XCircle /> Reject
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                            </>
-                          )}
-                          {e.status === 'SUSPENDED' && (
+                        <DropdownMenuContent align="end">
+                          {EVENT_ELIGIBLE.approve(e) && (
                             <DropdownMenuItem
-                              onSelect={() => actionMutation.mutate({ id: e.id, action: 'restore' })}
+                              onClick={() => actionMutation.mutate({ id: e.id, action: 'approve' })}
                             >
-                              <CheckCircle2 /> Restore
+                              <CheckCircle2 /> Approve and publish
                             </DropdownMenuItem>
                           )}
-                          {(e.status === 'PUBLISHED' || e.status === 'ONGOING') && (
+                          {EVENT_ELIGIBLE.reject(e) && (
                             <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onSelect={() => actionMutation.mutate({ id: e.id, action: 'suspend' })}
+                              variant="destructive"
+                              onClick={() => actionMutation.mutate({ id: e.id, action: 'reject' })}
+                            >
+                              <XCircle /> Reject
+                            </DropdownMenuItem>
+                          )}
+                          {EVENT_ELIGIBLE.suspend(e) && (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => actionMutation.mutate({ id: e.id, action: 'suspend' })}
                             >
                               <XCircle /> Suspend
                             </DropdownMenuItem>
                           )}
-                          {e.status === 'REJECTED' && (
+                          {e.status === 'SUSPENDED' && (
                             <DropdownMenuItem
-                              onSelect={() => actionMutation.mutate({ id: e.id, action: 'approve' })}
+                              onClick={() => actionMutation.mutate({ id: e.id, action: 'restore' })}
                             >
-                              <CheckCircle2 /> Approve
+                              <CheckCircle2 /> Restore to published
                             </DropdownMenuItem>
                           )}
-                          {e.status === 'PUBLISHED' && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem asChild>
-                                <Link href={paths.event(e)}>
-                                  <Eye /> View public page
-                                </Link>
-                              </DropdownMenuItem>
-                            </>
-                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem asChild>
+                            <Link href={paths.event(e)}>
+                              <Eye /> View public page
+                            </Link>
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
+                    </ConsoleActions>
+                  </ConsoleRow>
                 )
               })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+            </ConsoleTable>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() =>
+                  selection.setMany(
+                    events.map((e) => e.id),
+                    !allSelected,
+                  )
+                }
+              >
+                {allSelected ? 'Clear selection' : `Select all ${events.length}`}
+              </Button>
+              {data?.truncated && <TruncatedNote shown={events.length} noun="events" />}
+            </div>
+          </>
+        )}
+      </section>
 
       <ConfirmDialog
         action={confirming}
@@ -398,6 +463,6 @@ export function AdminEvents({
         onCancel={() => setConfirming(null)}
         onConfirm={() => confirming && runBulk(confirming)}
       />
-    </section>
+    </div>
   )
 }

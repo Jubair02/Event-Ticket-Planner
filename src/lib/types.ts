@@ -193,6 +193,23 @@ export interface AdminStats {
   totalRevenueMinor: number
   totalTicketsSold: number
   totalCheckIns: number
+  /**
+   * Everything waiting on an operator, in one payload.
+   *
+   * The overview used to know only about pending organizers and events, so an
+   * admin had to open the refund and payout queues to discover whether either
+   * needed them. A command centre that hides half the work is not one.
+   */
+  pendingRefunds: number
+  failedRefunds: number
+  pendingPayouts: number
+  /** Ledger account balances in paisa — the platform's actual position. */
+  ledger: {
+    gatewayClearingMinor: number
+    cashMinor: number
+    platformRevenueMinor: number
+    organizerPayableMinor: number
+  }
 }
 
 export interface AdminUserRow {

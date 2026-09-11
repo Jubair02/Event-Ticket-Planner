@@ -3,26 +3,41 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, Loader2, PlayCircle, RotateCcw, Undo2, XCircle } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  PlayCircle,
+  RotateCcw,
+  Undo2,
+  XCircle,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { apiGet, apiPatch, apiPost } from '@/lib/api'
 import { formatEventDate, formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
-import { cn } from '@/lib/utils'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/app/empty-state'
 import {
   FilterChips,
-  HeroMetric,
-  MetricGroup,
-  Panel,
   SearchBox,
   SectionHeading,
-  entrance,
+  sectionProps,
   type FilterOption,
 } from '@/components/dashboard/primitives'
+import { RefundStatusBadge } from '@/components/dashboard/status-badges'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
+import {
+  ActionConfirm,
+  ConsoleActions,
+  ConsoleCell,
+  ConsoleRow,
+  ConsoleSkeleton,
+  ConsoleTable,
+  ConsoleToolbar,
+  RowIdentity,
+  StatStrip,
+} from './console'
 import { useDebounced } from './shared'
 
 interface RefundRow {
@@ -60,7 +75,7 @@ interface RefundsResponse {
   owedOutstandingMinor: number
 }
 
-const STATUS_FILTERS: { value: string; label: string }[] = [
+const STATUS_FILTERS = [
   { value: 'ALL', label: 'All' },
   { value: 'REQUESTED', label: 'Requested' },
   { value: 'APPROVED', label: 'Approved' },
@@ -70,34 +85,51 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: 'REJECTED', label: 'Rejected' },
 ]
 
-const STATUS_TONE: Record<string, string> = {
-  COMPLETED: 'border-primary/20 bg-primary/10 text-primary',
-  APPROVED: 'border-chart-2/20 bg-chart-2/10 text-chart-2',
-  REQUESTED: 'border-chart-5/20 bg-chart-5/10 text-chart-5',
-  PROCESSING: 'border-chart-5/20 bg-chart-5/10 text-chart-5',
-  FAILED: 'border-destructive/20 bg-destructive/10 text-destructive',
-  REJECTED: 'bg-muted text-muted-foreground',
+const COLUMNS = [
+  { label: 'Refund' },
+  { label: 'Customer' },
+  { label: 'Reason' },
+  { label: 'Amount', className: 'text-right' },
+  { label: 'Status' },
+  { label: 'Actions', srOnly: true, className: 'text-right' },
+]
+
+const OWED_COLUMNS = [
+  { label: 'Order' },
+  { label: 'Customer' },
+  { label: 'Tickets', className: 'text-center' },
+  { label: 'Owed', className: 'text-right' },
+]
+
+interface RowAction {
+  key: string
+  label: string
+  icon: LucideIcon
+  destructive?: boolean
 }
 
-/** Which admin actions a refund in a given status can accept. */
-function actionsFor(status: string): { key: string; label: string; icon: typeof CheckCircle2 }[] {
+/**
+ * Which actions a refund can take, by status.
+ *
+ * FAILED is not terminal: the same row is retried so the idempotency key is
+ * reused and the customer cannot be paid twice, or abandoned into REJECTED.
+ */
+function actionsFor(status: string): RowAction[] {
   switch (status) {
     case 'REQUESTED':
       return [
         { key: 'approve', label: 'Approve', icon: CheckCircle2 },
-        { key: 'reject', label: 'Reject', icon: XCircle },
+        { key: 'reject', label: 'Reject', icon: XCircle, destructive: true },
       ]
     case 'APPROVED':
       return [
         { key: 'process', label: 'Send to gateway', icon: PlayCircle },
-        { key: 'reject', label: 'Reject', icon: XCircle },
+        { key: 'reject', label: 'Reject', icon: XCircle, destructive: true },
       ]
     case 'FAILED':
-      // FAILED is not terminal: the same row is retried so the customer cannot
-      // be paid twice, or abandoned into REJECTED.
       return [
         { key: 'retry', label: 'Retry', icon: RotateCcw },
-        { key: 'reject', label: 'Abandon', icon: XCircle },
+        { key: 'reject', label: 'Abandon', icon: XCircle, destructive: true },
       ]
     default:
       return []
@@ -117,7 +149,11 @@ export function AdminRefunds({
   useUrlQuery(paths.adminRefunds({ status, q: debounced }))
 
   const qc = useQueryClient()
+  // Keyed `${id}:${action}` so only the row being acted on shows a spinner and
+  // only its own buttons are disabled. The previous `disabled={running !== null}`
+  // froze every row in the queue while one refund was processing.
   const [running, setRunning] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<{ row: RefundRow; action: RowAction } | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-refunds', status, debounced],
@@ -132,6 +168,7 @@ export function AdminRefunds({
 
   const refunds = data?.refunds ?? []
   const counts = data?.counts ?? {}
+  const owed = data?.owed ?? []
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ['admin-refunds'] })
@@ -143,6 +180,7 @@ export function AdminRefunds({
       apiPatch(`/api/admin/refunds/${id}`, { action }),
     onSuccess: () => {
       toast.success('Refund updated')
+      setConfirming(null)
       invalidate()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -155,12 +193,21 @@ export function AdminRefunds({
       toast.success(
         typeof r?.processed === 'number'
           ? `${r.processed} refund${r.processed === 1 ? '' : 's'} sent to the gateway`
-          : 'Queue drained'
+          : 'Queue drained',
       )
       invalidate()
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  function run(row: RefundRow, action: RowAction) {
+    if (action.destructive) {
+      setConfirming({ row, action })
+      return
+    }
+    setRunning(`${row.id}:${action.key}`)
+    decide.mutate({ id: row.id, action: action.key })
+  }
 
   const filters: FilterOption[] = STATUS_FILTERS.map((f) => ({
     ...f,
@@ -172,187 +219,216 @@ export function AdminRefunds({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <HeroMetric
-          label="Awaiting a decision"
-          value={counts.REQUESTED ?? 0}
-          hint={
-            data
-              ? `${formatMinor(data.totals.REQUESTED ?? 0)} requested · ${formatMinor(
-                  data.owedOutstandingMinor
-                )} owed on cancelled events`
-              : undefined
-          }
-          loading={isLoading}
-          icon={Undo2}
-          {...entrance(0)}
-          className={cn('lg:col-span-2', entrance(0).className)}
-        >
-          {approvedWaiting > 0 && (
-            <div className="relative mt-4">
-              <Button
-                onClick={() => drain.mutate()}
-                disabled={drain.isPending}
-                className="active:scale-[0.98] motion-reduce:transform-none"
-              >
-                {drain.isPending ? <Loader2 className="animate-spin" /> : <PlayCircle />}
-                Send {approvedWaiting} approved to the gateway
-              </Button>
-            </div>
-          )}
-        </HeroMetric>
-        <MetricGroup
-          title="Refunded to date"
-          loading={isLoading}
-          items={[
-            { label: 'Completed', value: formatMinor(data?.totals.COMPLETED ?? 0) },
-            { label: 'In flight', value: formatMinor(data?.totals.PROCESSING ?? 0) },
-            { label: 'Failed', value: counts.FAILED ?? 0 },
-            { label: 'Rejected', value: counts.REJECTED ?? 0 },
-          ]}
-          {...entrance(1)}
-        />
-      </div>
+      <StatStrip
+        {...sectionProps(0, '')}
+        loading={isLoading}
+        items={[
+          {
+            label: 'Awaiting review',
+            value: counts.REQUESTED ?? 0,
+            tone: (counts.REQUESTED ?? 0) > 0 ? 'attention' : 'default',
+          },
+          { label: 'Refunded to date', value: formatMinor(data?.totals.COMPLETED ?? 0) },
+          {
+            label: 'Failed',
+            value: counts.FAILED ?? 0,
+            tone: (counts.FAILED ?? 0) > 0 ? 'danger' : 'default',
+          },
+          {
+            label: 'Owed, unhandled',
+            value: formatMinor(data?.owedOutstandingMinor ?? 0),
+            tone: (data?.owedOutstandingMinor ?? 0) > 0 ? 'danger' : 'default',
+          },
+        ]}
+      />
 
-      {(data?.owed.length ?? 0) > 0 && (
-        <section
-          aria-labelledby="owed-heading"
-          {...entrance(2)}
-          className={cn('space-y-3', entrance(2).className)}
-        >
+      {approvedWaiting > 0 && (
+        <div {...sectionProps(1, 'flex')}>
+          <Button
+            onClick={() => drain.mutate()}
+            disabled={drain.isPending}
+            className="active:scale-[0.98] motion-reduce:transform-none"
+          >
+            {drain.isPending ? <Loader2 className="animate-spin" /> : <PlayCircle />}
+            Send {approvedWaiting} approved refund{approvedWaiting === 1 ? '' : 's'} to the gateway
+          </Button>
+        </div>
+      )}
+
+      {owed.length > 0 && (
+        <section aria-labelledby="owed-heading" {...sectionProps(2)}>
           <SectionHeading
             id="owed-heading"
             title="Nothing is working on these"
             description="Paid orders on cancelled events with no live refund. This is money owed."
           />
-          <Panel padded={false} className="divide-y divide-border/70">
-            {data?.owed.slice(0, 8).map((o) => (
-              <div key={o.id} className="flex items-baseline justify-between gap-4 px-4 py-3 text-sm">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{o.orderNumber}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {o.event.title} · {o.customer.email} · {o.ticketCount} ticket
-                    {o.ticketCount === 1 ? '' : 's'}
-                  </p>
-                </div>
-                <span className="shrink-0 font-semibold tabular-nums text-destructive">
-                  {formatMinor(o.outstandingMinor)}
-                </span>
-              </div>
+          <ConsoleTable columns={OWED_COLUMNS} caption="Orders owed a refund">
+            {owed.slice(0, 8).map((o) => (
+              <ConsoleRow key={o.id} tone="danger">
+                <ConsoleCell label="Order">
+                  <RowIdentity
+                    icon={<AlertTriangle className="size-4" />}
+                    title={o.orderNumber}
+                    meta={o.event.title}
+                    tone="muted"
+                  />
+                </ConsoleCell>
+                <ConsoleCell label="Customer">
+                  <span className="block truncate">{o.customer.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {o.customer.email}
+                  </span>
+                </ConsoleCell>
+                <ConsoleCell label="Tickets" align="center">
+                  <span className="tabular-nums">{o.ticketCount}</span>
+                </ConsoleCell>
+                <ConsoleCell label="Owed" align="right">
+                  <span className="font-semibold text-destructive tabular-nums">
+                    {formatMinor(o.outstandingMinor)}
+                  </span>
+                </ConsoleCell>
+              </ConsoleRow>
             ))}
-          </Panel>
+          </ConsoleTable>
+          {owed.length > 8 && (
+            <p className="px-1 text-xs text-muted-foreground">
+              Showing 8 of <span className="tabular-nums">{owed.length}</span> unhandled orders.
+            </p>
+          )}
         </section>
       )}
 
-      <section
-        aria-labelledby="refunds-heading"
-        {...entrance(3)}
-        className={cn('space-y-4', entrance(3).className)}
-      >
+      <section aria-labelledby="refunds-heading" {...sectionProps(3)}>
         <SectionHeading
           id="refunds-heading"
           title="Refund queue"
           description="Approve, reject or push a refund to the gateway."
-        >
+        />
+
+        <ConsoleToolbar>
+          <FilterChips
+            value={status}
+            onChange={setStatus}
+            options={filters}
+            visible={7}
+            label="Refund status"
+          />
           <SearchBox
             value={search}
             onChange={setSearch}
             placeholder="Refund, order or customer"
             label="Search refunds"
           />
-        </SectionHeading>
-
-        <FilterChips value={status} onChange={setStatus} options={filters} visible={5} label="Refund status" />
+        </ConsoleToolbar>
 
         {isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 w-full rounded-xl" />
-            ))}
-          </div>
+          <ConsoleSkeleton rows={5} cols={6} />
         ) : refunds.length === 0 ? (
           <EmptyState
             icon={Undo2}
             title="Nothing in the queue"
             description={
               search || status !== 'ALL'
-                ? 'Nothing matches this filter.'
+                ? 'Nothing matches this filter. Try clearing it.'
                 : 'Refund requests will show up here.'
             }
           />
         ) : (
-          <div className="space-y-2">
+          <ConsoleTable columns={COLUMNS} caption="Refund queue, newest first">
             {refunds.map((r) => {
               const actions = actionsFor(r.status)
+              const problem = r.failureReason ?? r.rejectionReason
               return (
-                <Panel key={r.id} className="p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">{r.refundNumber}</p>
-                        <Badge variant="outline" className={STATUS_TONE[r.status] ?? ''}>
-                          {r.status}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">{r.reasonLabel}</span>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Order {r.order.orderNumber}
-                        {r.event ? ` · ${r.event.title}` : ''}
-                        {r.customer ? ` · ${r.customer.email}` : ''}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Requested {formatEventDate(r.requestedAt)}
-                        {r.gatewayAttempts > 0
-                          ? ` · ${r.gatewayAttempts} gateway attempt${r.gatewayAttempts === 1 ? '' : 's'}`
-                          : ''}
-                      </p>
-                      {(r.failureReason || r.rejectionReason) && (
-                        <p className="mt-1 text-xs text-destructive">
-                          {r.failureReason ?? r.rejectionReason}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex shrink-0 flex-col items-end gap-2">
-                      <div className="text-right">
-                        <p className="font-semibold tabular-nums">{formatMinor(r.amountMinor)}</p>
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          {formatMinor(r.organizerShareMinor)} organizer ·{' '}
-                          {formatMinor(r.platformShareMinor)} platform
-                        </p>
-                      </div>
-                      {actions.length > 0 && (
-                        <div className="flex gap-1.5">
-                          {actions.map((a) => (
-                            <Button
-                              key={a.key}
-                              size="sm"
-                              variant={a.key === 'reject' ? 'outline' : 'default'}
-                              className="h-8"
-                              disabled={running !== null}
-                              onClick={() => {
-                                setRunning(`${r.id}:${a.key}`)
-                                decide.mutate({ id: r.id, action: a.key })
-                              }}
-                            >
-                              {running === `${r.id}:${a.key}` ? (
-                                <Loader2 className="animate-spin" />
-                              ) : (
-                                <a.icon />
-                              )}
-                              {a.label}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </Panel>
+                <ConsoleRow
+                  key={r.id}
+                  tone={
+                    r.status === 'FAILED'
+                      ? 'danger'
+                      : r.status === 'REQUESTED'
+                        ? 'attention'
+                        : undefined
+                  }
+                >
+                  <ConsoleCell label="Refund">
+                    <RowIdentity
+                      icon={<Undo2 className="size-4" />}
+                      title={r.refundNumber}
+                      meta={`Order ${r.order.orderNumber} · ${formatEventDate(r.requestedAt)}`}
+                      tone={r.status === 'COMPLETED' ? 'default' : 'muted'}
+                    />
+                  </ConsoleCell>
+                  <ConsoleCell label="Customer">
+                    <span className="block truncate">{r.customer?.name ?? '—'}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {r.event?.title ?? ''}
+                    </span>
+                  </ConsoleCell>
+                  <ConsoleCell label="Reason">
+                    <span className="block truncate">{r.reasonLabel}</span>
+                    {problem && (
+                      <span className="block truncate text-xs text-destructive">{problem}</span>
+                    )}
+                    {r.gatewayAttempts > 0 && (
+                      <span className="block text-xs text-muted-foreground tabular-nums">
+                        {r.gatewayAttempts} gateway attempt{r.gatewayAttempts === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </ConsoleCell>
+                  <ConsoleCell label="Amount" align="right">
+                    <span className="block font-semibold tabular-nums">
+                      {formatMinor(r.amountMinor)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground tabular-nums">
+                      {formatMinor(r.organizerShareMinor)} org ·{' '}
+                      {formatMinor(r.platformShareMinor)} us
+                    </span>
+                  </ConsoleCell>
+                  <ConsoleCell label="Status">
+                    <RefundStatusBadge status={r.status} />
+                  </ConsoleCell>
+                  <ConsoleActions>
+                    {actions.length === 0 ? (
+                      <span className="text-xs text-muted-foreground md:hidden">No action</span>
+                    ) : (
+                      actions.map((a) => {
+                        const busy = running === `${r.id}:${a.key}`
+                        return (
+                          <Button
+                            key={a.key}
+                            size="sm"
+                            variant={a.destructive ? 'outline' : 'default'}
+                            className="h-8 active:scale-[0.98] motion-reduce:transform-none"
+                            // Only this row's own actions are blocked.
+                            disabled={running?.startsWith(`${r.id}:`) ?? false}
+                            onClick={() => run(r, a)}
+                          >
+                            {busy ? <Loader2 className="animate-spin" /> : <a.icon />}
+                            {a.label}
+                          </Button>
+                        )
+                      })
+                    )}
+                  </ConsoleActions>
+                </ConsoleRow>
               )
             })}
-          </div>
+          </ConsoleTable>
         )}
       </section>
+
+      <ActionConfirm
+        open={confirming !== null}
+        title={`${confirming?.action.label ?? 'Reject'} ${confirming?.row.refundNumber ?? ''}?`}
+        body="The customer will not be refunded, and the tickets on this refund are released back to the order. You can raise a new refund later."
+        cta={confirming?.action.label ?? 'Reject'}
+        pending={decide.isPending}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (!confirming) return
+          setRunning(`${confirming.row.id}:${confirming.action.key}`)
+          decide.mutate({ id: confirming.row.id, action: confirming.action.key })
+        }}
+      />
     </div>
   )
 }

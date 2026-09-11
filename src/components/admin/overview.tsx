@@ -2,7 +2,17 @@
 
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, ClipboardCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  BanknoteArrowUp,
+  Building2,
+  CheckCircle2,
+  Scale,
+  Ticket,
+  TrendingUp,
+  Undo2,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { apiGet } from '@/lib/api'
 import { formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
@@ -10,47 +20,91 @@ import { cn } from '@/lib/utils'
 import type { AdminStats } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { MetricGroup, entrance, panelClass } from '@/components/dashboard/primitives'
+import {
+  Eyebrow,
+  HeroMetric,
+  Meter,
+  MetricGroup,
+  Panel,
+  SectionHeading,
+  sectionProps,
+} from '@/components/dashboard/primitives'
 
-// ============================= Overview =============================
+/**
+ * The admin command centre.
+ *
+ * One question first: **is anything waiting on me?** Everything else on this
+ * page is context. So the review queue comes before the metrics, it covers all
+ * four queues rather than the two the stats endpoint used to know about, and it
+ * disappears entirely when there is nothing to do — rather than rendering four
+ * reassuring zeros an operator has to read to learn nothing.
+ */
 
-function QueueRow({
-  count,
-  label,
-  hint,
-  cta,
-  href,
-  loading,
-}: {
-  count: number
+interface QueueItem {
   label: string
-  hint: string
-  cta: string
-  /** Deep link into the section, with its filter already narrowed to the queue. */
+  count: number
   href: string
-  loading: boolean
-}) {
-  const waiting = count > 0
+  icon: LucideIcon
+  /** Failures and money owed are not merely "pending". */
+  urgent?: boolean
+}
+
+function ReviewQueue({ items }: { items: QueueItem[] }) {
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
-      <span
-        className={cn(
-          'w-12 shrink-0 text-2xl font-semibold tabular-nums',
-          waiting ? 'text-foreground' : 'text-muted-foreground/50',
-        )}
-      >
-        {loading ? <Skeleton className="h-7 w-9" /> : count}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className={cn('block text-sm font-medium', !waiting && 'text-muted-foreground')}>{label}</span>
-        <span className="block text-xs text-muted-foreground">{hint}</span>
-      </span>
-      {waiting && (
-        <Button asChild size="sm" className="active:scale-[0.98]">
-          <Link href={href}>{cta}</Link>
-        </Button>
-      )}
-    </li>
+    <Panel {...sectionProps(0, 'relative overflow-hidden')}>
+      <div
+        className="pointer-events-none absolute -top-20 -right-16 h-56 w-56 rounded-full bg-chart-5/15 blur-3xl"
+        aria-hidden="true"
+      />
+      <div className="relative">
+        <Eyebrow>Needs review</Eyebrow>
+        <h2 className="mt-1.5 text-lg font-semibold tracking-tight">
+          {items.length === 1
+            ? 'One queue needs you'
+            : `${items.length} queues need you`}
+        </h2>
+      </div>
+
+      <ul className="relative mt-4 grid gap-2 sm:grid-cols-2">
+        {items.map((it) => (
+          <li key={it.label}>
+            <Link
+              href={it.href}
+              className={cn(
+                'flex items-center gap-3 rounded-xl border px-3 py-3 transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                it.urgent
+                  ? 'border-destructive/30 bg-destructive/5 hover:bg-destructive/10'
+                  : 'border-chart-5/40 bg-chart-5/5 hover:bg-chart-5/10',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex size-9 shrink-0 items-center justify-center rounded-xl',
+                  it.urgent ? 'bg-destructive/10 text-destructive' : 'bg-chart-5/20 text-foreground',
+                )}
+                aria-hidden="true"
+              >
+                <it.icon className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{it.label}</span>
+                <span className="block text-xs text-muted-foreground">Open the queue</span>
+              </span>
+              <span
+                className={cn(
+                  'shrink-0 text-2xl font-semibold tabular-nums',
+                  it.urgent && 'text-destructive',
+                )}
+              >
+                {it.count}
+              </span>
+              <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   )
 }
 
@@ -59,139 +113,178 @@ export function AdminOverview() {
     queryKey: ['admin-stats'],
     queryFn: () => apiGet<{ stats: AdminStats }>('/api/admin/stats'),
   })
+
   const s = data?.stats
-  const pendingEvents = s?.pendingEvents ?? 0
-  const pendingOrganizers = s?.pendingOrganizers ?? 0
-  const waiting = pendingEvents + pendingOrganizers
-  // Counts default to 0 while loading, so only warn once real data has arrived.
-  const hasQueue = !isLoading && waiting > 0
+  const ledger = s?.ledger
+
+  const queue: QueueItem[] = [
+    {
+      label: `${s?.pendingOrganizers ?? 0} organizer application${s?.pendingOrganizers === 1 ? '' : 's'}`,
+      count: s?.pendingOrganizers ?? 0,
+      href: paths.adminOrganizers({ status: 'PENDING' }),
+      icon: Building2,
+    },
+    {
+      label: `${s?.pendingEvents ?? 0} event${s?.pendingEvents === 1 ? '' : 's'} to approve`,
+      count: s?.pendingEvents ?? 0,
+      href: paths.adminEvents({ status: 'PENDING_APPROVAL' }),
+      icon: Ticket,
+    },
+    {
+      label: `${s?.pendingRefunds ?? 0} refund${s?.pendingRefunds === 1 ? '' : 's'} to action`,
+      count: s?.pendingRefunds ?? 0,
+      href: paths.adminRefunds({ status: 'REQUESTED' }),
+      icon: Undo2,
+    },
+    {
+      label: `${s?.failedRefunds ?? 0} refund${s?.failedRefunds === 1 ? '' : 's'} failed at the gateway`,
+      count: s?.failedRefunds ?? 0,
+      href: paths.adminRefunds({ status: 'FAILED' }),
+      icon: Undo2,
+      urgent: true,
+    },
+    {
+      label: `${s?.pendingPayouts ?? 0} payout${s?.pendingPayouts === 1 ? '' : 's'} to review`,
+      count: s?.pendingPayouts ?? 0,
+      href: paths.adminPayouts({ status: 'REQUESTED' }),
+      icon: BanknoteArrowUp,
+    },
+  ].filter((it) => it.count > 0)
+
+  const checkInRate =
+    s && s.totalTicketsSold > 0 ? s.totalCheckIns / s.totalTicketsSold : null
 
   return (
     <div className="space-y-6">
-      {/* The one job this page exists for, given the weight to match. */}
-      <section
-        aria-labelledby="admin-queue-heading"
-        {...entrance(0)}
-        className={cn(
-          panelClass,
-          'p-5 sm:p-6',
-          entrance(0).className,
-          hasQueue && 'border-chart-5/50 bg-chart-5/10 shadow-chart-5/10',
-        )}
-      >
-        <div className="flex items-start gap-3">
+      {isLoading ? (
+        <Panel className="space-y-3">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-6 w-48" />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Skeleton className="h-16 rounded-xl" />
+            <Skeleton className="h-16 rounded-xl" />
+          </div>
+        </Panel>
+      ) : queue.length > 0 ? (
+        <ReviewQueue items={queue} />
+      ) : (
+        <Panel {...sectionProps(0, 'flex items-center gap-3')}>
           <span
-            className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-xl',
-              hasQueue ? 'bg-chart-5/25 text-foreground' : 'bg-primary/10 text-primary',
-            )}
+            className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
+            aria-hidden="true"
           >
-            {hasQueue ? <ClipboardCheck className="size-5" /> : <CheckCircle2 className="size-5" />}
+            <CheckCircle2 className="size-5" />
           </span>
-          <div className="min-w-0">
-            <h2 id="admin-queue-heading" className="text-lg font-semibold tracking-tight">
-              Needs review
-            </h2>
+          <div>
+            <p className="font-medium">Nothing is waiting on you</p>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {isLoading
-                ? 'Checking for submissions…'
-                : hasQueue
-                  ? 'Submissions are held from the public site until you decide.'
-                  : 'Nothing is waiting on you right now.'}
+              No applications, submissions, refunds or payouts need a decision right now.
             </p>
           </div>
-        </div>
-
-        {(isLoading || hasQueue) && (
-          <ul className="mt-4 divide-y border-t pt-4">
-            <QueueRow
-              count={pendingEvents}
-              label="Events awaiting approval"
-              hint="Not visible to customers until approved"
-              cta="Review events"
-              href={paths.adminEvents({ status: 'PENDING_APPROVAL' })}
-              loading={isLoading}
-            />
-            <QueueRow
-              count={pendingOrganizers}
-              label="Organizer applications"
-              hint="Cannot publish events until approved"
-              cta="Review applications"
-              href={paths.adminOrganizers('PENDING')}
-              loading={isLoading}
-            />
-          </ul>
-        )}
-      </section>
+        </Panel>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Revenue is the one number worth reading at a glance, so it gets the size. */}
-        <section
-          aria-labelledby="admin-revenue-heading"
-          {...entrance(1)}
-          className={cn(panelClass, 'relative overflow-hidden p-5 sm:p-6', entrance(1).className)}
+        <HeroMetric
+          label="Gross ticket revenue"
+          icon={TrendingUp}
+          loading={isLoading}
+          value={formatMinor(s?.totalRevenueMinor ?? 0)}
+          hint={
+            isLoading
+              ? undefined
+              : `${s?.paidOrders ?? 0} paid order${s?.paidOrders === 1 ? '' : 's'} of ${s?.totalOrders ?? 0} · ${s?.totalTicketsSold ?? 0} tickets`
+          }
+          {...sectionProps(1, 'lg:col-span-2')}
         >
-          <div
-            className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl"
-            aria-hidden="true"
+          <div className="relative mt-5 flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline">
+              <Link href={paths.adminPayments()}>
+                <Scale /> Payments and ledger
+              </Link>
+            </Button>
+            <Button asChild variant="ghost">
+              <Link href={paths.adminAudit()}>
+                Audit trail <ArrowRight />
+              </Link>
+            </Button>
+          </div>
+        </HeroMetric>
+
+        <div {...sectionProps(2, '')}>
+          {/* Ledger balances, not re-summed order totals — the same figures the
+              payments page shows, from the same source. */}
+          <MetricGroup
+            title="Platform position"
+            loading={isLoading}
+            items={[
+              { label: 'Held at gateway', value: formatMinor(ledger?.gatewayClearingMinor ?? 0) },
+              { label: 'In our bank', value: formatMinor(ledger?.cashMinor ?? 0) },
+              { label: 'Owed to organizers', value: formatMinor(ledger?.organizerPayableMinor ?? 0) },
+              { label: 'Our revenue', value: formatMinor(ledger?.platformRevenueMinor ?? 0) },
+            ]}
           />
-          <h3
-            id="admin-revenue-heading"
-            className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase"
-          >
-            Revenue
-          </h3>
-          {isLoading ? (
-            <Skeleton className="mt-3 h-9 w-40" />
-          ) : (
-            <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
-              {formatMinor(s?.totalRevenueMinor ?? 0)}
-            </p>
-          )}
-          <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-            {s?.paidOrders ?? 0} paid of {s?.totalOrders ?? 0} orders
-          </p>
-          <dl className="mt-4 divide-y border-t">
-            <div className="flex items-baseline justify-between gap-4 py-2">
-              <dt className="text-sm text-muted-foreground">Tickets sold</dt>
-              <dd className="text-sm font-semibold tabular-nums">
-                {isLoading ? <Skeleton className="h-4 w-12" /> : (s?.totalTicketsSold ?? 0)}
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4 py-2 last:pb-0">
-              <dt className="text-sm text-muted-foreground">Check-ins</dt>
-              <dd className="text-sm font-semibold tabular-nums">
-                {isLoading ? <Skeleton className="h-4 w-12" /> : (s?.totalCheckIns ?? 0)}
-              </dd>
-            </div>
-          </dl>
-        </section>
-
-        <div {...entrance(2)}>
-        <MetricGroup
-          title="People"
-          loading={isLoading}
-          items={[
-            { label: 'All accounts', value: s?.totalUsers ?? 0 },
-            { label: 'Customers', value: s?.totalCustomers ?? 0 },
-            { label: 'Organizers', value: s?.totalOrganizers ?? 0 },
-            { label: 'Event staff', value: s?.totalStaff ?? 0 },
-          ]}
-        />
-        </div>
-
-        <div {...entrance(3)}>
-        <MetricGroup
-          title="Events"
-          loading={isLoading}
-          items={[
-            { label: 'All events', value: s?.totalEvents ?? 0 },
-            { label: 'Published', value: s?.publishedEvents ?? 0 },
-            { label: 'Awaiting approval', value: pendingEvents },
-          ]}
-        />
         </div>
       </div>
+
+      <section aria-labelledby="platform-heading" {...sectionProps(3)}>
+        <SectionHeading
+          id="platform-heading"
+          title="Platform"
+          description="Who is on it, what is listed, and whether attendees turn up."
+        >
+          <Button asChild size="sm" variant="outline" className="h-8">
+            <Link href={paths.adminUsers()}>
+              Manage users <ArrowRight />
+            </Link>
+          </Button>
+        </SectionHeading>
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <MetricGroup
+            title="People"
+            loading={isLoading}
+            items={[
+              { label: 'Customers', value: s?.totalCustomers ?? 0 },
+              { label: 'Organizers', value: s?.totalOrganizers ?? 0 },
+              { label: 'Gate staff', value: s?.totalStaff ?? 0 },
+            ]}
+          />
+          <MetricGroup
+            title="Events"
+            loading={isLoading}
+            items={[
+              { label: 'All events', value: s?.totalEvents ?? 0 },
+              { label: 'Published', value: s?.publishedEvents ?? 0 },
+              { label: 'Awaiting approval', value: s?.pendingEvents ?? 0 },
+            ]}
+          />
+          <Panel className="p-5">
+            <Eyebrow>Attendance</Eyebrow>
+            {isLoading ? (
+              <Skeleton className="mt-2 h-8 w-20" />
+            ) : (
+              <p className="mt-2 text-2xl font-semibold tracking-tight">
+                {checkInRate === null ? '—' : `${Math.round(checkInRate * 100)}%`}
+              </p>
+            )}
+            <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+              {checkInRate === null
+                ? 'No tickets sold yet'
+                : `${s?.totalCheckIns ?? 0} of ${s?.totalTicketsSold ?? 0} sold tickets scanned`}
+            </p>
+            {checkInRate !== null && (
+              <Meter
+                className="mt-3"
+                value={s?.totalCheckIns ?? 0}
+                max={s?.totalTicketsSold ?? 0}
+                label={`${s?.totalCheckIns ?? 0} of ${s?.totalTicketsSold ?? 0} tickets checked in`}
+                hot={1.01}
+              />
+            )}
+          </Panel>
+        </div>
+      </section>
     </div>
   )
 }

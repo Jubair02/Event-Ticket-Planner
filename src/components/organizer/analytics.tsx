@@ -1,23 +1,34 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { BarChart3, TrendingUp } from 'lucide-react'
+import { BarChart3, ChevronRight, TrendingUp } from 'lucide-react'
 import { apiGet } from '@/lib/api'
-import { categoryEmoji, formatEventDate, formatMinor } from '@/lib/format'
+import { formatEventDate, formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { EmptyState } from '@/components/app/empty-state'
 import {
+  Eyebrow,
   HeroMetric,
+  Meter,
   MetricGroup,
   Panel,
   SectionHeading,
   entrance,
 } from '@/components/dashboard/primitives'
 import { EventStatusBadge } from '@/components/dashboard/status-badges'
+import { CategoryIcon } from '@/components/app/category-icon'
 
 interface EventAnalyticsRow {
   id: string
@@ -58,6 +69,23 @@ interface AnalyticsResponse {
 
 const pct = (n: number) => `${Math.round(n * 100)}%`
 
+/**
+ * How the comparison is ordered.
+ *
+ * "Compare your events side by side" is the whole point of this table, and a
+ * comparison you cannot reorder only answers the question the default happens
+ * to match. Date stays the default so the list still reads as a timeline.
+ */
+const SORTS = {
+  recent: { label: 'Most recent', pick: (e: EventAnalyticsRow) => new Date(e.startDate).getTime() },
+  revenue: { label: 'Net revenue', pick: (e: EventAnalyticsRow) => e.netMinor },
+  sellThrough: { label: 'Sell-through', pick: (e: EventAnalyticsRow) => e.sellThrough },
+  sold: { label: 'Tickets sold', pick: (e: EventAnalyticsRow) => e.sold },
+  attendance: { label: 'Turnout', pick: (e: EventAnalyticsRow) => e.attendanceRate ?? -1 },
+} as const
+
+type SortKey = keyof typeof SORTS
+
 /** Sell-through as a bar, because a row of percentages is hard to compare. */
 function SellThrough({ sold, capacity }: { sold: number; capacity: number }) {
   const ratio = capacity > 0 ? Math.min(sold / capacity, 1) : 0
@@ -70,28 +98,45 @@ function SellThrough({ sold, capacity }: { sold: number; capacity: number }) {
         </span>
         <span className="text-muted-foreground tabular-nums">{pct(ratio)}</span>
       </div>
-      <div
-        className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted"
-        role="img"
-        aria-label={`${pct(ratio)} of capacity sold`}
-      >
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none"
-          style={{ width: `${ratio * 100}%` }}
-        />
-      </div>
+      <Meter
+        className="mt-1"
+        value={sold}
+        max={capacity}
+        label={`${sold} of ${capacity} tickets sold`}
+      />
     </div>
   )
 }
 
 export function OrganizerAnalytics() {
+  const [sort, setSort] = useState<SortKey>('recent')
+
   const { data, isLoading } = useQuery({
     queryKey: ['organizer-analytics'],
     queryFn: () => apiGet<AnalyticsResponse>('/api/organizer/analytics'),
   })
 
-  const events = data?.events ?? []
   const t = data?.totals
+
+  const events = useMemo(() => {
+    const rows = data?.events ?? []
+    const { pick } = SORTS[sort]
+    // Copy first: the query cache's array must not be sorted in place.
+    return [...rows].sort((a, b) => pick(b) - pick(a))
+  }, [data?.events, sort])
+
+  /**
+   * Ceiling revenue across every event, at list price.
+   *
+   * The API computes `potentialMinor` per event precisely because it is "what
+   * makes the sell-through figure meaningful", but `totals` does not carry it
+   * and nothing rendered it — so the headline number had no scale to sit
+   * against. Summed here rather than guessed.
+   */
+  const potentialMinor = useMemo(
+    () => (data?.events ?? []).reduce((sum, e) => sum + e.potentialMinor, 0),
+    [data?.events],
+  )
 
   return (
     <div className="space-y-6">
@@ -108,7 +153,32 @@ export function OrganizerAnalytics() {
           icon={TrendingUp}
           {...entrance(0)}
           className={cn('lg:col-span-2', entrance(0).className)}
-        />
+        >
+          {/* Net against the list-price ceiling: the figure alone says nothing
+              about whether it was a good result. */}
+          {!isLoading && potentialMinor > 0 && (
+            <div className="relative mt-4">
+              <div className="flex items-baseline justify-between gap-3 text-xs">
+                <Eyebrow className="text-[10px]">Against list-price ceiling</Eyebrow>
+                <span className="font-semibold tabular-nums">
+                  {pct(Math.min((t?.netMinor ?? 0) / potentialMinor, 1))}
+                </span>
+              </div>
+              <Meter
+                className="mt-1.5"
+                value={t?.netMinor ?? 0}
+                max={potentialMinor}
+                label={`${formatMinor(t?.netMinor ?? 0)} of ${formatMinor(potentialMinor)} possible at list price`}
+                // Earning more is good news, so this bar must not flip to the
+                // warning tone the way an inventory bar does.
+                hot={1.1}
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
+                {formatMinor(potentialMinor)} if every ticket sold at list price
+              </p>
+            </div>
+          )}
+        </HeroMetric>
         <MetricGroup
           title="Across your events"
           loading={isLoading}
@@ -135,7 +205,23 @@ export function OrganizerAnalytics() {
           id="per-event-heading"
           title="By event"
           description="Compare your events side by side, then open one for the full breakdown."
-        />
+        >
+          {events.length > 1 && (
+            <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+              <SelectTrigger className="h-9 w-auto gap-1.5 text-xs" aria-label="Sort events by">
+                <span className="text-muted-foreground">Sort</span>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {(Object.keys(SORTS) as SortKey[]).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {SORTS[k].label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </SectionHeading>
 
         {isLoading ? (
           <div className="space-y-2">
@@ -155,9 +241,68 @@ export function OrganizerAnalytics() {
             }
           />
         ) : (
-          <Panel padded={false} className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
+          <>
+            {/* ── small screens ──
+                The table below needed 860px and scrolled sideways to get it.
+                Same figures, stacked, with the whole row opening the event. */}
+            <Panel padded={false} className="overflow-hidden lg:hidden">
+              <h3 className="sr-only">Your events by the numbers</h3>
+              <ul className="divide-y divide-border/70">
+                {events.map((e) => (
+                  <li key={e.id}>
+                    <Link
+                      href={paths.organizerEvent(e.id)}
+                      className="flex items-start gap-3 p-4 transition-colors duration-200 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                      <span
+                        className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
+                        aria-hidden="true"
+                      >
+                        <CategoryIcon category={e.category} className="size-4" />
+                      </span>
+
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="truncate text-sm font-medium">{e.title}</span>
+                          <EventStatusBadge status={e.status} />
+                        </span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground tabular-nums">
+                          {formatEventDate(e.startDate)}
+                        </span>
+
+                        <span className="mt-2 block">
+                          <SellThrough sold={e.sold} capacity={e.capacity} />
+                        </span>
+
+                        <span className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+                          <span className="tabular-nums">
+                            <span className="text-muted-foreground">Net </span>
+                            <span className="font-semibold">{formatMinor(e.netMinor)}</span>
+                          </span>
+                          <span className="text-muted-foreground tabular-nums">
+                            {e.orders} {e.orders === 1 ? 'order' : 'orders'}
+                          </span>
+                          <span className="text-muted-foreground tabular-nums">
+                            {e.attendanceRate === null
+                              ? 'No turnout yet'
+                              : `${pct(e.attendanceRate)} turned up`}
+                          </span>
+                        </span>
+                      </span>
+
+                      <ChevronRight
+                        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+
+            {/* ── large screens ── */}
+            <Panel padded={false} className="hidden overflow-x-auto lg:block">
+              <table className="w-full text-sm">
                 <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground uppercase">
                   <tr>
                     <th className="px-4 py-3 font-medium">Event</th>
@@ -173,7 +318,12 @@ export function OrganizerAnalytics() {
                     <tr key={e.id} className="transition-colors hover:bg-muted/30">
                       <td className="px-4 py-3">
                         <div className="flex items-start gap-2">
-                          <span aria-hidden="true">{categoryEmoji(e.category)}</span>
+                          <span
+                            className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                            aria-hidden="true"
+                          >
+                            <CategoryIcon category={e.category} className="size-4" />
+                          </span>
                           <div className="min-w-0">
                             <p className="max-w-[220px] truncate font-medium">{e.title}</p>
                             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -211,7 +361,7 @@ export function OrganizerAnalytics() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button asChild size="sm" variant="outline" className="h-8">
+                        <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer">
                           <Link href={paths.organizerEvent(e.id)}>Details</Link>
                         </Button>
                       </td>
@@ -219,8 +369,8 @@ export function OrganizerAnalytics() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </Panel>
+            </Panel>
+          </>
         )}
       </section>
     </div>

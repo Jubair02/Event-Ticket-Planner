@@ -7,6 +7,7 @@ import { ImagePlus, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { apiPost, apiPut } from '@/lib/api'
 import { CATEGORIES, CATEGORY_LABELS, CITIES } from '@/lib/constants'
 import { formatMinor } from '@/lib/format'
+import { CategoryIcon } from '@/components/app/category-icon'
 import { MAX_TICKET_PRICE_MINOR, toMinor } from '@/lib/money'
 import type { EventListItem, TicketTypeDTO } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -329,7 +330,12 @@ export function EventForm({
                 <SelectContent>
                   {CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>
-                      {CATEGORY_LABELS[c]?.emoji} {CATEGORY_LABELS[c]?.label ?? c}
+                      {/* Lucide, not the emoji from CATEGORY_LABELS: an emoji
+                          renders differently on every platform, ignores
+                          currentColor so it cannot follow the theme, and is
+                          announced by its unicode name rather than the label. */}
+                      <CategoryIcon category={c} className="size-4 text-muted-foreground" />
+                      {CATEGORY_LABELS[c]?.label ?? c}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -6,22 +6,27 @@ import { CreditCard } from 'lucide-react'
 import { apiGet } from '@/lib/api'
 import { formatEventDate, formatMinor } from '@/lib/format'
 import { paths } from '@/lib/routes'
-import { cn } from '@/lib/utils'
 import { PAYMENT_STATUS_LABELS } from '@/lib/constants'
-import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/app/empty-state'
 import {
   FilterChips,
-  HeroMetric,
-  MetricGroup,
-  Panel,
   SearchBox,
   SectionHeading,
-  entrance,
+  sectionProps,
   type FilterOption,
 } from '@/components/dashboard/primitives'
 import { PaymentStatusBadge } from '@/components/dashboard/status-badges'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
+import {
+  ConsoleCell,
+  ConsoleRow,
+  ConsoleSkeleton,
+  ConsoleTable,
+  ConsoleToolbar,
+  RowIdentity,
+  StatStrip,
+  TruncatedNote,
+} from './console'
 import { useDebounced } from './shared'
 
 interface PaymentRow {
@@ -59,6 +64,15 @@ interface PaymentsResponse {
 }
 
 const STATUSES = ['PAID', 'PENDING', 'FAILED', 'REFUNDED', 'CANCELLED']
+
+const COLUMNS = [
+  { label: 'Order' },
+  { label: 'Customer' },
+  { label: 'Event' },
+  { label: 'Method' },
+  { label: 'Amount', className: 'text-right' },
+  { label: 'Status' },
+]
 
 export function AdminPayments({
   initialStatus,
@@ -98,131 +112,101 @@ export function AdminPayments({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <HeroMetric
-          label="Captured from customers"
-          value={formatMinor(data?.totalsMinor.PAID ?? 0)}
-          hint={`${counts.PAID ?? 0} successful payment${(counts.PAID ?? 0) === 1 ? '' : 's'}`}
-          loading={isLoading}
-          icon={CreditCard}
-          {...entrance(0)}
-          className={cn('lg:col-span-2', entrance(0).className)}
-        />
-        {/* Straight from the ledger, so this panel and the books cannot disagree. */}
-        <MetricGroup
-          title="Where the money sits"
-          loading={isLoading}
-          items={[
-            { label: 'Held at gateway', value: formatMinor(ledger?.gatewayClearingMinor ?? 0) },
-            { label: 'In our bank', value: formatMinor(ledger?.cashMinor ?? 0) },
-            { label: 'Owed to organizers', value: formatMinor(ledger?.organizerPayableMinor ?? 0) },
-            { label: 'Platform revenue', value: formatMinor(ledger?.platformRevenueMinor ?? 0) },
-          ]}
-          {...entrance(1)}
-        />
-      </div>
+      {/* Straight from the ledger, so this band and the books cannot disagree. */}
+      <StatStrip
+        {...sectionProps(0, '')}
+        loading={isLoading}
+        items={[
+          { label: 'Captured', value: formatMinor(data?.totalsMinor.PAID ?? 0) },
+          { label: 'Held at gateway', value: formatMinor(ledger?.gatewayClearingMinor ?? 0) },
+          { label: 'Owed to organizers', value: formatMinor(ledger?.organizerPayableMinor ?? 0) },
+          { label: 'Platform revenue', value: formatMinor(ledger?.platformRevenueMinor ?? 0) },
+        ]}
+      />
 
-      <section
-        aria-labelledby="payments-heading"
-        {...entrance(2)}
-        className={cn('space-y-4', entrance(2).className)}
-      >
+      <section aria-labelledby="payments-heading" {...sectionProps(1)}>
         <SectionHeading
           id="payments-heading"
           title="Payments"
           description="Read-only. Correcting a payment means issuing a refund or an adjustment."
-        >
+        />
+
+        <ConsoleToolbar>
+          <FilterChips
+            value={status}
+            onChange={setStatus}
+            options={filters}
+            visible={6}
+            label="Payment status"
+          />
           <SearchBox
             value={search}
             onChange={setSearch}
             placeholder="Transaction, order or customer"
             label="Search payments"
           />
-        </SectionHeading>
-
-        <FilterChips value={status} onChange={setStatus} options={filters} label="Payment status" />
+        </ConsoleToolbar>
 
         {isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full rounded-xl" />
-            ))}
-          </div>
+          <ConsoleSkeleton rows={6} cols={6} />
         ) : payments.length === 0 ? (
           <EmptyState
             icon={CreditCard}
             title="No payments here"
             description={
               search || status !== 'ALL'
-                ? 'Nothing matches this filter.'
+                ? 'Nothing matches this filter. Try clearing it.'
                 : 'Payments appear as customers check out.'
             }
           />
         ) : (
-          <Panel padded={false} className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
-                <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground uppercase">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Order</th>
-                    <th className="px-4 py-3 font-medium">Customer</th>
-                    <th className="px-4 py-3 font-medium">Event</th>
-                    <th className="px-4 py-3 font-medium">Method</th>
-                    <th className="px-4 py-3 text-right font-medium">Amount</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/70">
-                  {payments.map((p) => (
-                    <tr key={p.id} className="transition-colors hover:bg-muted/30">
-                      <td className="px-4 py-3">
-                        <p className="font-medium">{p.order.orderNumber}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatEventDate(p.paidAt ?? p.createdAt)}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="max-w-[170px] truncate">{p.customer.name}</p>
-                        <p className="max-w-[170px] truncate text-xs text-muted-foreground">
-                          {p.customer.email}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="max-w-[180px] truncate text-muted-foreground">
-                          {p.event.title}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p>{p.method ?? '—'}</p>
-                        {p.transactionId && (
-                          <p className="max-w-[140px] truncate text-xs text-muted-foreground">
-                            {p.transactionId}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        <p className="font-medium">{formatMinor(p.amountMinor)}</p>
-                        {p.order.refundedMinor > 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            {formatMinor(p.order.refundedMinor)} refunded
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <PaymentStatusBadge status={p.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-        )}
-
-        {data?.truncated && (
-          <p className="text-xs text-muted-foreground">
-            Showing the most recent 200 payments. Narrow the search to see older ones.
-          </p>
+          <>
+            <ConsoleTable columns={COLUMNS} caption="Payments, newest first">
+              {payments.map((p) => (
+                <ConsoleRow key={p.id} tone={p.status === 'FAILED' ? 'danger' : undefined}>
+                  <ConsoleCell label="Order">
+                    <RowIdentity
+                      icon={<CreditCard className="size-4" />}
+                      title={p.order.orderNumber}
+                      meta={formatEventDate(p.paidAt ?? p.createdAt)}
+                      tone={p.status === 'PAID' ? 'default' : 'muted'}
+                    />
+                  </ConsoleCell>
+                  <ConsoleCell label="Customer">
+                    <span className="block truncate">{p.customer.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {p.customer.email}
+                    </span>
+                  </ConsoleCell>
+                  <ConsoleCell label="Event">
+                    <span className="block truncate text-muted-foreground">{p.event.title}</span>
+                  </ConsoleCell>
+                  <ConsoleCell label="Method">
+                    <span className="block">{p.method ?? '—'}</span>
+                    {p.transactionId && (
+                      <span className="block truncate font-mono text-xs text-muted-foreground">
+                        {p.transactionId}
+                      </span>
+                    )}
+                  </ConsoleCell>
+                  <ConsoleCell label="Amount" align="right">
+                    <span className="block font-medium tabular-nums">
+                      {formatMinor(p.amountMinor)}
+                    </span>
+                    {p.order.refundedMinor > 0 && (
+                      <span className="block text-xs text-muted-foreground tabular-nums">
+                        {formatMinor(p.order.refundedMinor)} refunded
+                      </span>
+                    )}
+                  </ConsoleCell>
+                  <ConsoleCell label="Status">
+                    <PaymentStatusBadge status={p.status} />
+                  </ConsoleCell>
+                </ConsoleRow>
+              ))}
+            </ConsoleTable>
+            {data?.truncated && <TruncatedNote shown={payments.length} noun="payments" />}
+          </>
         )}
       </section>
     </div>

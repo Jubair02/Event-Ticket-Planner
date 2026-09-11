@@ -1,10 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2, Plus, ShieldCheck, ShieldOff, Trash2, UserCheck, Users } from 'lucide-react'
+import {
+  AlertTriangle,
+  Loader2,
+  Plus,
+  Search,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+  UserCheck,
+  Users,
+} from 'lucide-react'
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import type { EventListItem } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -54,30 +65,143 @@ interface StaffRow {
 /** How many assigned-event chips to show inline before collapsing to "+N more". */
 const VISIBLE_ASSIGNMENTS = 2
 
+/** Above this many events, the assignment list gets a filter box. */
+const SEARCHABLE_FROM = 7
+
+/** Two letters from the name, for the row's avatar. */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+/**
+ * A people list needs a visual anchor per row, or every row looks identical
+ * while you scan for one person. Initials rather than a photo: there is no
+ * avatar field on a staff account, and a generic placeholder icon on each row
+ * would be an anchor that distinguishes nothing.
+ */
+function StaffAvatar({ name, suspended }: { name: string; suspended: boolean }) {
+  return (
+    <span
+      className={cn(
+        'flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+        suspended ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary',
+      )}
+      aria-hidden="true"
+    >
+      {initials(name)}
+    </span>
+  )
+}
+
+/**
+ * "Assigned to nothing" is a dead end, not a neutral state: the account can
+ * sign in and then find no event to scan. It used to read as muted grey filler,
+ * which is how a real misconfiguration stayed invisible.
+ */
+function NoAssignments() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-chart-5/60 bg-chart-5/10 px-2 py-0.5 text-xs font-medium text-foreground">
+      <AlertTriangle className="size-3 shrink-0" aria-hidden="true" />
+      Not assigned
+    </span>
+  )
+}
+
 function StaffEventsCheckboxList({
   events,
   selected,
   onToggle,
+  onSetAll,
 }: {
   events: EventListItem[]
   selected: string[]
   onToggle: (id: string) => void
+  onSetAll: (ids: string[]) => void
 }) {
+  const [q, setQ] = useState('')
+
+  const searchable = events.length >= SEARCHABLE_FROM
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return events
+    return events.filter((e) => e.title.toLowerCase().includes(needle))
+  }, [events, q])
+
   if (events.length === 0) {
-    return <p className="text-sm text-muted-foreground">You have no events yet — create one first.</p>
+    return (
+      <p className="text-sm text-muted-foreground">You have no events yet — create one first.</p>
+    )
   }
+
   return (
-    <div className="max-h-44 space-y-2 overflow-y-auto rounded-lg border p-3">
-      {events.map((e) => (
-        <label key={e.id} className="flex cursor-pointer items-center gap-2 text-sm" htmlFor={`assign-${e.id}`}>
-          <Checkbox
-            id={`assign-${e.id}`}
-            checked={selected.includes(e.id)}
-            onCheckedChange={() => onToggle(e.id)}
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground tabular-nums">
+          {selected.length} of {events.length} selected
+        </p>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 cursor-pointer px-2 text-xs"
+            disabled={selected.length === events.length}
+            onClick={() => onSetAll(events.map((e) => e.id))}
+          >
+            Select all
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 cursor-pointer px-2 text-xs"
+            disabled={selected.length === 0}
+            onClick={() => onSetAll([])}
+          >
+            Clear
+          </Button>
+        </div>
+      </div>
+
+      {searchable && (
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
           />
-          <span className="truncate">{e.title}</span>
-        </label>
-      ))}
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Filter events"
+            aria-label="Filter events by name"
+            className="h-9 pl-8"
+          />
+        </div>
+      )}
+
+      <div className="max-h-44 space-y-2 overflow-y-auto rounded-lg border p-3">
+        {shown.length === 0 ? (
+          <p className="py-2 text-center text-sm text-muted-foreground">No events match.</p>
+        ) : (
+          shown.map((e) => (
+            <label
+              key={e.id}
+              className="flex cursor-pointer items-center gap-2 text-sm"
+              htmlFor={`assign-${e.id}`}
+            >
+              <Checkbox
+                id={`assign-${e.id}`}
+                checked={selected.includes(e.id)}
+                onCheckedChange={() => onToggle(e.id)}
+              />
+              <span className="truncate">{e.title}</span>
+            </label>
+          ))
+        )}
+      </div>
     </div>
   )
 }
@@ -169,6 +293,72 @@ export function StaffManager() {
 
   const creating = createMutation.isPending
 
+  /**
+   * The description doubles as the summary line, because an account that is
+   * suspended or unassigned cannot scan and the organizer has no other way to
+   * notice from here.
+   */
+  const unassigned = staff.filter((s) => s.staffAssignments.length === 0).length
+  const suspended = staff.filter((s) => s.status !== 'ACTIVE').length
+  const summary = [
+    `${staff.length} account${staff.length === 1 ? '' : 's'}`,
+    suspended > 0 ? `${suspended} suspended` : null,
+    unassigned > 0 ? `${unassigned} not assigned to any event` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  /** Suspend / reactivate / remove, shared by the table and the card list. */
+  function renderStaffActions(s: StaffRow) {
+    const rowBusy = toggleMutation.isPending && toggleMutation.variables?.id === s.id
+    const active = s.status === 'ACTIVE'
+    return (
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 cursor-pointer"
+          onClick={() => {
+            setManageSelected(s.staffAssignments.map((a) => a.event.id))
+            setManageTarget(s)
+          }}
+          aria-label={`Assign events for ${s.name}`}
+        >
+          <UserCheck /> Events
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 cursor-pointer"
+          title={active ? 'Suspend' : 'Reactivate'}
+          aria-label={active ? `Suspend ${s.name}` : `Reactivate ${s.name}`}
+          disabled={rowBusy}
+          onClick={() => toggleMutation.mutate(s)}
+        >
+          {rowBusy ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : active ? (
+            // Was `text-chart-5`, which measures 1.81:1 against the card and
+            // fails even the 3:1 floor for a meaningful icon. The shape plus
+            // the label carry the meaning; the colour was only decoration.
+            <ShieldOff className="size-4" />
+          ) : (
+            <ShieldCheck className="size-4 text-primary" />
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 cursor-pointer text-destructive hover:text-destructive"
+          aria-label={`Remove ${s.name}`}
+          onClick={() => setDeleteTarget(s)}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <section aria-labelledby="organizer-staff-heading" className="space-y-4">
       <div {...entrance(0)}>
@@ -178,7 +368,9 @@ export function StaffManager() {
           description={
             isLoading
               ? 'Loading staff…'
-              : `${staff.length} account${staff.length === 1 ? '' : 's'} — staff sign in with their email and can only scan tickets for the events you assign.`
+              : staff.length === 0
+                ? 'Staff sign in with their email and can only scan tickets for the events you assign.'
+                : `${summary} — staff can only scan the events you assign.`
           }
         >
           <Button
@@ -223,10 +415,70 @@ export function StaffManager() {
             }
           />
         ) : (
-          <Panel padded={false} className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <Table className="min-w-[760px]">
-                <caption className="sr-only">Your gate staff with contact details, assigned events, status and actions</caption>
+          <>
+            {/* ── small screens ──
+                The table needed 760px and scrolled sideways to get it. */}
+            <Panel padded={false} className="overflow-hidden lg:hidden">
+              <h3 className="sr-only">Your gate staff</h3>
+              <ul className="divide-y divide-border/70">
+                {staff.map((s) => {
+                  const extra = s.staffAssignments.length - VISIBLE_ASSIGNMENTS
+                  return (
+                    <li key={s.id} className="p-4">
+                      <div className="flex items-start gap-3">
+                        <StaffAvatar name={s.name} suspended={s.status !== 'ACTIVE'} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <p className="truncate text-sm font-medium">{s.name}</p>
+                            {s.status === 'ACTIVE' ? (
+                              <Badge>Active</Badge>
+                            ) : (
+                              <Badge variant="destructive">Suspended</Badge>
+                            )}
+                          </div>
+                          <p className="truncate text-xs text-muted-foreground">{s.email}</p>
+                          {s.phone && (
+                            <p className="text-xs text-muted-foreground tabular-nums">{s.phone}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-1">
+                        {s.staffAssignments.length === 0 ? (
+                          <NoAssignments />
+                        ) : (
+                          <>
+                            {s.staffAssignments.slice(0, VISIBLE_ASSIGNMENTS).map((a) => (
+                              <Badge
+                                key={a.id}
+                                variant="outline"
+                                className="max-w-[160px] truncate font-normal"
+                              >
+                                {a.event.title}
+                              </Badge>
+                            ))}
+                            {extra > 0 && (
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                +{extra} more
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex justify-end">{renderStaffActions(s)}</div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </Panel>
+
+            {/* ── large screens ── */}
+            <Panel padded={false} className="hidden overflow-x-auto lg:block">
+              <Table>
+                <caption className="sr-only">
+                  Your gate staff with contact details, assigned events, status and actions
+                </caption>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Staff</TableHead>
@@ -239,26 +491,36 @@ export function StaffManager() {
                 <TableBody>
                   {staff.map((s) => {
                     const extra = s.staffAssignments.length - VISIBLE_ASSIGNMENTS
-                    const rowBusy = toggleMutation.isPending && toggleMutation.variables?.id === s.id
                     return (
                       <TableRow key={s.id} className="transition-colors">
                         <TableCell>
-                          <p className="font-medium">{s.name}</p>
-                          <p className="text-xs text-muted-foreground">{s.email}</p>
+                          <div className="flex items-center gap-3">
+                            <StaffAvatar name={s.name} suspended={s.status !== 'ACTIVE'} />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{s.name}</p>
+                              <p className="truncate text-xs text-muted-foreground">{s.email}</p>
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell className="text-sm tabular-nums">{s.phone || '—'}</TableCell>
                         <TableCell>
                           {s.staffAssignments.length === 0 ? (
-                            <span className="text-xs text-muted-foreground">No events</span>
+                            <NoAssignments />
                           ) : (
                             <div className="flex max-w-[280px] flex-wrap items-center gap-1">
                               {s.staffAssignments.slice(0, VISIBLE_ASSIGNMENTS).map((a) => (
-                                <Badge key={a.id} variant="outline" className="max-w-[160px] truncate font-normal">
+                                <Badge
+                                  key={a.id}
+                                  variant="outline"
+                                  className="max-w-[160px] truncate font-normal"
+                                >
                                   {a.event.title}
                                 </Badge>
                               ))}
                               {extra > 0 && (
-                                <span className="text-xs text-muted-foreground tabular-nums">+{extra} more</span>
+                                <span className="text-xs text-muted-foreground tabular-nums">
+                                  +{extra} more
+                                </span>
                               )}
                             </div>
                           )}
@@ -270,55 +532,16 @@ export function StaffManager() {
                             <Badge variant="destructive">Suspended</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8"
-                              onClick={() => {
-                                setManageSelected(s.staffAssignments.map((a) => a.event.id))
-                                setManageTarget(s)
-                              }}
-                              aria-label={`Assign events for ${s.name}`}
-                            >
-                              <UserCheck /> Events
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              title={s.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}
-                              aria-label={s.status === 'ACTIVE' ? `Suspend ${s.name}` : `Reactivate ${s.name}`}
-                              disabled={rowBusy}
-                              onClick={() => toggleMutation.mutate(s)}
-                            >
-                              {rowBusy ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : s.status === 'ACTIVE' ? (
-                                <ShieldOff className="h-4 w-4 text-chart-5" />
-                              ) : (
-                                <ShieldCheck className="h-4 w-4 text-primary" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              aria-label={`Remove ${s.name}`}
-                              onClick={() => setDeleteTarget(s)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                        <TableCell>
+                          <div className="flex justify-end">{renderStaffActions(s)}</div>
                         </TableCell>
                       </TableRow>
                     )
                   })}
                 </TableBody>
               </Table>
-            </div>
-          </Panel>
+            </Panel>
+          </>
         )}
       </div>
 
@@ -374,6 +597,7 @@ export function StaffManager() {
                 onToggle={(id) =>
                   setSelectedEvents((sel) => (sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]))
                 }
+                onSetAll={setSelectedEvents}
               />
             </div>
           </div>
@@ -411,6 +635,7 @@ export function StaffManager() {
             onToggle={(id) =>
               setManageSelected((sel) => (sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]))
             }
+            onSetAll={setManageSelected}
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setManageTarget(null)} disabled={assignMutation.isPending}>

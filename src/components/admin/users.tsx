@@ -3,51 +3,36 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, Loader2, MoreHorizontal, Users, XCircle } from 'lucide-react'
+import { CheckCircle2, Loader2, UserRound, Users, XCircle } from 'lucide-react'
 import { apiGet, apiPut } from '@/lib/api'
 import { formatEventDate } from '@/lib/format'
 import { paths } from '@/lib/routes'
 import { useAppStore } from '@/lib/store'
-import { cn } from '@/lib/utils'
 import type { AdminUserRow } from '@/lib/types'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { EmptyState } from '@/components/app/empty-state'
-import { SearchBox, SectionHeading, entrance, panelClass } from '@/components/dashboard/primitives'
+import {
+  FilterChips,
+  SearchBox,
+  SectionHeading,
+  sectionProps,
+  type FilterOption,
+} from '@/components/dashboard/primitives'
+import { AccountStatusBadge, RoleBadge } from '@/components/dashboard/status-badges'
 import { useUrlQuery } from '@/components/dashboard/use-url-query'
+import {
+  ActionConfirm,
+  ConsoleActions,
+  ConsoleCell,
+  ConsoleRow,
+  ConsoleSkeleton,
+  ConsoleTable,
+  ConsoleToolbar,
+  RowIdentity,
+  StatStrip,
+  TruncatedNote,
+} from './console'
 import {
   BulkBar,
   ConfirmDialog,
@@ -58,7 +43,28 @@ import {
   type BulkAction,
 } from './shared'
 
-// ============================= Users =============================
+interface UsersResponse {
+  users: AdminUserRow[]
+  counts: Record<string, number>
+  truncated: boolean
+}
+
+const ROLE_FILTERS = [
+  { value: 'ALL', label: 'All' },
+  { value: 'CUSTOMER', label: 'Customers' },
+  { value: 'ORGANIZER', label: 'Organizers' },
+  { value: 'EVENT_STAFF', label: 'Staff' },
+  { value: 'SUPER_ADMIN', label: 'Admins' },
+]
+
+const COLUMNS = [
+  { label: 'Select', srOnly: true, className: 'w-10' },
+  { label: 'User' },
+  { label: 'Role' },
+  { label: 'Account' },
+  { label: 'Joined' },
+  { label: 'Actions', srOnly: true, className: 'text-right' },
+]
 
 export function AdminUsers({
   initialRole,
@@ -67,8 +73,8 @@ export function AdminUsers({
   initialRole: string
   initialSearch: string
 }) {
-  // Seeded from the URL by the page; see AdminEvents for why only the debounced
-  // search reaches the address bar.
+  // Seeded from the URL by the page; only the debounced search reaches the
+  // address bar, so a refresh restores the search that was actually run.
   const [roleFilter, setRoleFilter] = useState(initialRole)
   const [search, setSearch] = useState(initialSearch)
 
@@ -88,11 +94,12 @@ export function AdminUsers({
       if (roleFilter !== 'ALL') params.set('role', roleFilter)
       if (q.trim()) params.set('q', q.trim())
       const qs = params.toString()
-      return apiGet<{ users: AdminUserRow[] }>(`/api/admin/users${qs ? `?${qs}` : ''}`)
+      return apiGet<UsersResponse>(`/api/admin/users${qs ? `?${qs}` : ''}`)
     },
   })
 
   const users = data?.users ?? []
+  const counts = data?.counts ?? {}
 
   /** The API refuses both, so never offer them. */
   function canSuspend(u: AdminUserRow) {
@@ -141,7 +148,9 @@ export function AdminUsers({
     const rows = action.key === 'SUSPENDED' ? suspendable : activatable
     if (rows.length === 0) return
     setRunning(action.key)
-    const r = await mapLimit(rows, 5, (u) => apiPut(`/api/admin/users/${u.id}`, { status: action.key }))
+    const r = await mapLimit(rows, 5, (u) =>
+      apiPut(`/api/admin/users/${u.id}`, { status: action.key }),
+    )
     setRunning(null)
     setConfirming(null)
     selection.clear()
@@ -149,151 +158,169 @@ export function AdminUsers({
     invalidate()
   }
 
-  function roleBadge(role: string) {
-    switch (role) {
-      case 'SUPER_ADMIN':
-        return <Badge>Admin</Badge>
-      case 'ORGANIZER':
-        return (
-          <Badge variant="outline" className="border-primary/40 text-primary">
-            Organizer
-          </Badge>
-        )
-      case 'EVENT_STAFF':
-        return <Badge variant="outline">Staff</Badge>
-      default:
-        return <Badge variant="secondary">Customer</Badge>
-    }
-  }
+  const filters: FilterOption[] = ROLE_FILTERS.map((f) => ({
+    ...f,
+    count:
+      f.value === 'ALL' ? Object.values(counts).reduce((a, b) => a + b, 0) : (counts[f.value] ?? 0),
+  }))
 
   const allSelected = selectable.length > 0 && selected.length === selectable.length
   const busy = running !== null
+  const suspending = suspendTarget?.status === 'ACTIVE'
 
   return (
-    <section aria-labelledby="admin-users-heading" className="space-y-4">
-      <SectionHeading
-        id="admin-users-heading"
-        title="Users"
-        description={
-          isLoading
-            ? 'Loading accounts…'
-            : `${users.length} account${users.length === 1 ? '' : 's'} — suspend or restore access.`
-        }
-      >
-        <SearchBox
-          value={search}
-          onChange={setSearch}
-          placeholder="Search name or email…"
-          label="Search users"
-        />
-      </SectionHeading>
-
-      <Select value={roleFilter} onValueChange={setRoleFilter}>
-        <SelectTrigger className="w-44" aria-label="Filter by role">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="ALL">All roles</SelectItem>
-          <SelectItem value="CUSTOMER">Customers</SelectItem>
-          <SelectItem value="ORGANIZER">Organizers</SelectItem>
-          <SelectItem value="EVENT_STAFF">Event staff</SelectItem>
-          <SelectItem value="SUPER_ADMIN">Super admins</SelectItem>
-        </SelectContent>
-      </Select>
-
-      <BulkBar
-        selectedCount={selected.length}
-        actions={bulkActions}
-        running={running}
-        onClear={selection.clear}
-        onRun={(a) => (a.confirm ? setConfirming(a) : runBulk(a))}
+    <div className="space-y-6">
+      <StatStrip
+        {...sectionProps(0, '')}
+        loading={isLoading}
+        items={[
+          { label: 'Customers', value: counts.CUSTOMER ?? 0 },
+          { label: 'Organizers', value: counts.ORGANIZER ?? 0 },
+          { label: 'Gate staff', value: counts.EVENT_STAFF ?? 0 },
+          { label: 'Admins', value: counts.SUPER_ADMIN ?? 0 },
+        ]}
       />
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-14 w-full rounded-lg" />
-          ))}
-        </div>
-      ) : users.length === 0 ? (
-        <EmptyState icon={Users} title="No users found" description="Try a different role filter or search term." />
-      ) : (
-        <div className={cn(panelClass, 'overflow-x-auto')}>
-          <Table className="min-w-[800px]">
-            <caption className="sr-only">
-              All platform accounts with role, join date, status and access actions
-            </caption>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={allSelected}
-                    disabled={selectable.length === 0}
-                    onCheckedChange={(c) => selection.setMany(selectable.map((u) => u.id), c === true)}
-                    aria-label="Select all suspendable users"
-                  />
-                </TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Joined</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+      <section aria-labelledby="admin-users-heading" {...sectionProps(1)}>
+        <SectionHeading
+          id="admin-users-heading"
+          title="Users"
+          description="Suspending blocks sign-in. Nothing is deleted, and tickets stay valid."
+        />
+
+        <ConsoleToolbar>
+          <FilterChips
+            value={roleFilter}
+            onChange={setRoleFilter}
+            options={filters}
+            visible={5}
+            label="Filter by role"
+          />
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Name or email"
+            label="Search users"
+          />
+        </ConsoleToolbar>
+
+        <BulkBar
+          selectedCount={selected.length}
+          actions={bulkActions}
+          running={running}
+          onRun={(a) => (a.confirm ? setConfirming(a) : runBulk(a))}
+          onClear={selection.clear}
+        />
+
+        {isLoading ? (
+          <ConsoleSkeleton rows={6} cols={5} />
+        ) : users.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="No users here"
+            description={
+              search || roleFilter !== 'ALL'
+                ? 'Nothing matches this filter. Try clearing it.'
+                : 'Accounts appear here as people sign up.'
+            }
+          />
+        ) : (
+          <>
+            <ConsoleTable columns={COLUMNS} caption="User directory, newest first">
               {users.map((u) => {
-                const isSelected = selection.ids.has(u.id)
-                const rowBusy =
-                  busy || (statusMutation.isPending && statusMutation.variables?.id === u.id)
+                const protected_ = !canSuspend(u)
                 return (
-                  <TableRow key={u.id} data-state={isSelected ? 'selected' : undefined}>
-                    <TableCell>
-                      {canSuspend(u) ? (
+                  <ConsoleRow key={u.id} tone={u.status !== 'ACTIVE' ? 'danger' : undefined}>
+                    <ConsoleCell label="Select" className="md:w-10">
+                      {protected_ ? (
+                        // The API refuses to suspend an admin or yourself, so the
+                        // control is absent rather than present-and-failing.
+                        <span className="sr-only">Not selectable</span>
+                      ) : (
                         <Checkbox
-                          checked={isSelected}
+                          checked={selection.ids.has(u.id)}
                           onCheckedChange={() => selection.toggle(u.id)}
                           aria-label={`Select ${u.name}`}
+                          disabled={busy}
                         />
-                      ) : (
-                        <span className="sr-only">Not selectable</span>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <p className="font-medium">
-                        {u.name}
-                        {u.id === currentUser?.id && (
-                          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{u.email}</p>
-                    </TableCell>
-                    <TableCell className="text-sm tabular-nums">{u.phone || '—'}</TableCell>
-                    <TableCell>{roleBadge(u.role)}</TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{formatEventDate(u.createdAt)}</TableCell>
-                    <TableCell>
-                      {u.status === 'ACTIVE' ? <Badge>Active</Badge> : <Badge variant="destructive">Suspended</Badge>}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {canSuspend(u) && (
+                    </ConsoleCell>
+                    <ConsoleCell label="User">
+                      <RowIdentity
+                        icon={<UserRound className="size-4" />}
+                        title={u.name}
+                        meta={
+                          <>
+                            {u.email}
+                            {u.organizer && (
+                              <span className="block truncate">
+                                {u.organizer.organizationName}
+                              </span>
+                            )}
+                          </>
+                        }
+                        tone={u.status === 'ACTIVE' ? 'default' : 'muted'}
+                      />
+                    </ConsoleCell>
+                    <ConsoleCell label="Role">
+                      <RoleBadge role={u.role} />
+                    </ConsoleCell>
+                    <ConsoleCell label="Account">
+                      <AccountStatusBadge status={u.status} />
+                    </ConsoleCell>
+                    <ConsoleCell label="Joined">
+                      <span className="text-muted-foreground">{formatEventDate(u.createdAt)}</span>
+                    </ConsoleCell>
+                    <ConsoleActions>
+                      {protected_ ? (
+                        <span className="text-xs text-muted-foreground">
+                          {u.id === currentUser?.id ? 'This is you' : 'Protected'}
+                        </span>
+                      ) : (
                         <Button
                           size="sm"
                           variant={u.status === 'ACTIVE' ? 'outline' : 'default'}
-                          className="h-8 active:scale-[0.98]"
-                          disabled={rowBusy}
+                          className="h-8 active:scale-[0.98] motion-reduce:transform-none"
+                          disabled={busy || statusMutation.isPending}
                           onClick={() => setSuspendTarget(u)}
                         >
+                          {statusMutation.isPending && statusMutation.variables?.id === u.id ? (
+                            <Loader2 className="animate-spin" />
+                          ) : u.status === 'ACTIVE' ? (
+                            <XCircle />
+                          ) : (
+                            <CheckCircle2 />
+                          )}
                           {u.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
                         </Button>
                       )}
-                    </TableCell>
-                  </TableRow>
+                    </ConsoleActions>
+                  </ConsoleRow>
                 )
               })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+            </ConsoleTable>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              {selectable.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    selection.setMany(
+                      selectable.map((u) => u.id),
+                      !allSelected,
+                    )
+                  }
+                >
+                  {allSelected ? 'Clear selection' : `Select all ${selectable.length}`}
+                </Button>
+              )}
+              {data?.truncated && <TruncatedNote shown={users.length} noun="users" />}
+            </div>
+          </>
+        )}
+      </section>
 
       <ConfirmDialog
         action={confirming}
@@ -302,42 +329,26 @@ export function AdminUsers({
         onConfirm={() => confirming && runBulk(confirming)}
       />
 
-      {/* Single-row suspend / activate confirm */}
-      <AlertDialog open={!!suspendTarget} onOpenChange={(o) => !o && setSuspendTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {suspendTarget?.status === 'ACTIVE' ? 'Suspend this user?' : 'Activate this user?'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {suspendTarget?.name} ({suspendTarget?.email}) —{' '}
-              {suspendTarget?.status === 'ACTIVE'
-                ? 'they will no longer be able to log in.'
-                : 'they will be able to log in again.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className={
-                suspendTarget?.status === 'ACTIVE' ? 'bg-destructive text-white hover:bg-destructive/90' : undefined
-              }
-              onClick={(ev) => {
-                ev.preventDefault()
-                if (suspendTarget) {
-                  statusMutation.mutate({
-                    id: suspendTarget.id,
-                    status: suspendTarget.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE',
-                  })
-                }
-              }}
-            >
-              {statusMutation.isPending && <Loader2 className="animate-spin" />}
-              {suspendTarget?.status === 'ACTIVE' ? 'Suspend user' : 'Activate user'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>
+      <ActionConfirm
+        open={suspendTarget !== null}
+        title={suspending ? `Suspend ${suspendTarget?.name}?` : `Activate ${suspendTarget?.name}?`}
+        body={
+          suspending
+            ? 'They will not be able to log in until reactivated. Their orders and tickets are kept.'
+            : 'They will be able to log in again immediately.'
+        }
+        cta={suspending ? 'Suspend' : 'Activate'}
+        destructive={suspending}
+        pending={statusMutation.isPending}
+        onCancel={() => setSuspendTarget(null)}
+        onConfirm={() => {
+          if (!suspendTarget) return
+          statusMutation.mutate({
+            id: suspendTarget.id,
+            status: suspendTarget.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE',
+          })
+        }}
+      />
+    </div>
   )
 }

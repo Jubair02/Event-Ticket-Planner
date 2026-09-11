@@ -1,5 +1,7 @@
 'use client'
 
+import { CheckCircle2, ShieldCheck, TicketX } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { TicketDTO } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -28,6 +30,32 @@ export const TICKET_STATUS_META: Record<Status, StatusMeta> = {
 
 export function ticketStatusMeta(status: Status): StatusMeta {
   return TICKET_STATUS_META[status] ?? TICKET_STATUS_META.INVALID
+}
+
+/**
+ * The three states a holder actually cares about: can I walk in, have I
+ * already, or is this ticket dead.
+ *
+ * Four statuses collapse to three tones because CANCELLED and INVALID mean the
+ * same thing at a door. This lives here rather than in the e-ticket because My
+ * Tickets renders the same judgement in list form — two copies of it would
+ * drift, which is the problem this module exists to prevent.
+ */
+export type TicketTone = 'valid' | 'used' | 'void'
+
+export function ticketTone(status: Status): TicketTone {
+  if (status === 'CHECKED_IN') return 'used'
+  return ticketStatusMeta(status).void ? 'void' : 'valid'
+}
+
+/**
+ * One icon per tone, so colour is never the only carrier of state — it holds
+ * up under colourblindness, greyscale print and `forced-colors`.
+ */
+export const TICKET_TONE_ICON: Record<TicketTone, LucideIcon> = {
+  valid: ShieldCheck,
+  used: CheckCircle2,
+  void: TicketX,
 }
 
 export function TicketStatusBadge({ status, className }: { status: Status; className?: string }) {

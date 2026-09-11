@@ -41,6 +41,18 @@ export async function GET(req: NextRequest) {
         : {}),
     }
 
+    /**
+     * What the header figures describe.
+     *
+     * Deliberately carries `eventId` but neither `status` nor `q`: picking an
+     * event re-scopes the whole page to that event, while filtering by status
+     * or searching must not move the totals underneath the operator.
+     */
+    const scope: Prisma.OrderWhereInput = {
+      event: { organizerId: organizer.id },
+      ...(eventId ? { eventId } : {}),
+    }
+
     const [rows, grouped, paidAgg] = await Promise.all([
       db.order.findMany({
         where,
@@ -66,13 +78,13 @@ export async function GET(req: NextRequest) {
       db.order.groupBy({
         by: ['paymentStatus'],
         _count: { _all: true },
-        where: { event: { organizerId: organizer.id } },
+        where: scope,
       }),
       // Gross across paid orders, not just the page being shown, so the header
       // figure does not change as the operator filters.
       db.order.aggregate({
         _sum: { totalMinor: true, refundedMinor: true },
-        where: { event: { organizerId: organizer.id }, paymentStatus: 'PAID' },
+        where: { ...scope, paymentStatus: 'PAID' },
       }),
     ])
 

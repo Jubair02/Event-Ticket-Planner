@@ -67,10 +67,11 @@ export const paths = {
   organizerEvents: (status?: string) =>
     withQuery('/organizer/events', { status: status && status !== 'ALL' ? status : undefined }),
   organizerEvent: (eventId: string) => `/organizer/events/${eventId}`,
-  organizerOrders: (query?: { status?: string; q?: string }) =>
+  organizerOrders: (query?: { status?: string; q?: string; eventId?: string }) =>
     withQuery('/organizer/orders', {
       status: query?.status && query.status !== 'ALL' ? query.status : undefined,
       q: query?.q,
+      eventId: query?.eventId && query.eventId !== 'ALL' ? query.eventId : undefined,
     }),
   organizerAnalytics: () => '/organizer/analytics',
   organizerPayouts: () => '/organizer/payouts',
@@ -82,8 +83,11 @@ export const paths = {
       status: query?.status && query.status !== 'ALL' ? query.status : undefined,
       q: query?.q,
     }),
-  adminOrganizers: (status?: string) =>
-    withQuery('/admin/organizers', { status: status && status !== 'ALL' ? status : undefined }),
+  adminOrganizers: (query?: { status?: string; q?: string }) =>
+    withQuery('/admin/organizers', {
+      status: query?.status && query.status !== 'ALL' ? query.status : undefined,
+      q: query?.q,
+    }),
   adminUsers: (query?: { role?: string; q?: string }) =>
     withQuery('/admin/users', {
       role: query?.role && query.role !== 'ALL' ? query.role : undefined,

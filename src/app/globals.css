@@ -25,6 +25,8 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -60,6 +62,11 @@
   --accent: oklch(0.94 0.04 150);
   --accent-foreground: oklch(0.3 0.06 160);
   --destructive: oklch(0.58 0.21 27);
+  /* Caution — distinct from both "go" (primary) and "stop" (destructive).
+     A real token because `chart-5` swings from amber to teal between
+     themes, which is fine for a chart series and wrong for a warning. */
+  --warning: oklch(0.79 0.15 78);
+  --warning-foreground: oklch(0.28 0.07 60);
   --border: oklch(0.9 0.015 150);
   --input: oklch(0.9 0.015 150);
   --ring: oklch(0.51 0.115 160);
@@ -94,6 +101,8 @@
   --accent: oklch(0.3 0.03 158);
   --accent-foreground: oklch(0.97 0.005 120);
   --destructive: oklch(0.65 0.19 25);
+  --warning: oklch(0.82 0.15 80);
+  --warning-foreground: oklch(0.26 0.07 60);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
   --ring: oklch(0.72 0.13 158);

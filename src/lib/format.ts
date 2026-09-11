@@ -46,9 +46,11 @@ export function categoryLabel(cat: string): string {
   return CATEGORY_LABELS[cat]?.label ?? cat
 }
 
-export function categoryEmoji(cat: string): string {
-  return CATEGORY_LABELS[cat]?.emoji ?? '🎪'
-}
+/*
+ * `categoryEmoji` was removed once the last call site moved to `<CategoryIcon>`.
+ * The emoji values stay in `CATEGORY_LABELS` as data, but nothing renders them
+ * as an icon — see the anti-pattern list in the design system.
+ */
 
 /**
  * "2 days left" style label (or "Happening now" / "Ended").

@@ -74,11 +74,6 @@ export function useSelection() {
   }
 }
 
-// ============================= Shared presentation =============================
-
-
-
-
 
 export type BulkAction = {
   key: string
